@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GLS Unity WebGL + Web MIDI Bridge</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #111; color: #eee; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    #topbar { position: fixed; left: 0; right: 0; top: 0; background: #1b1b1b; padding: 8px 12px; display: flex; gap: 8px; align-items: center; z-index: 10; }
+    #status { margin-left: auto; display: flex; gap: 12px; font-size: 12px; opacity: 0.9; }
+    #container { position: absolute; top: 40px; left: 0; right: 0; bottom: 0; }
+    #unity-canvas { width: 100%; height: 100%; background: #000; display: block; }
+    select, button { background: #2a2a2a; color: #eee; border: 1px solid #3a3a3a; padding: 6px 10px; border-radius: 4px; }
+    button:hover { background: #333; }
+    .label { font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <button id="enable-midi">Enable MIDI</button>
+    <label for="midi-inputs" class="label">Input:</label>
+    <select id="midi-inputs"><option value="all">All Inputs</option></select>
+    <div id="status">
+      <span id="unity-status">Unity: loading…</span>
+      <span id="midi-status">MIDI: idle</span>
+      <span id="active-device">Active: all</span>
+    </div>
+  </div>
+  <div id="container">
+    <canvas id="unity-canvas" tabindex="0"></canvas>
+  </div>
+
+  <!-- Unity Loader (ScaleTrainerV2WebGL) -->
+  <script src="/UnityBuilds/ScaleTrainerV2WebGL/Build/ScaleTrainerV2WebGL.loader.js"></script>
+  <!-- Web MIDI Bridge -->
+  <script src="/js/midi/webMidiBridge.js"></script>
+
+  <script>
+    // Prevent page scrolling for common keys (hygiene)
+    window.addEventListener('keydown', (e) => {
+      const blocked = [' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+      if (blocked.includes(e.key)) {
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    // Unity → JS stub for future events
+    window.GLS_OnUnityEvent = function(json) {
+      try {
+        const obj = typeof json === 'string' ? JSON.parse(json) : json;
+        console.log('[Unity→JS]', obj);
+      } catch (err) {
+        console.warn('GLS_OnUnityEvent parse error', err, json);
+      }
+    };
+
+    const canvas = document.getElementById('unity-canvas');
+    const unityStatusEl = document.getElementById('unity-status');
+    const midiStatusEl = document.getElementById('midi-status');
+    const activeDeviceEl = document.getElementById('active-device');
+    const inputSelect = document.getElementById('midi-inputs');
+
+    // Initialize Unity instance
+    (function initUnity() {
+      if (typeof createUnityInstance !== 'function') {
+        unityStatusEl.textContent = 'Unity: loader not found';
+        console.error('Unity loader script missing or not loaded');
+        return;
+      }
+
+      const config = {
+        dataUrl: "/UnityBuilds/ScaleTrainerV2WebGL/Build/ScaleTrainerV2WebGL.data",
+        frameworkUrl: "/UnityBuilds/ScaleTrainerV2WebGL/Build/ScaleTrainerV2WebGL.framework.js",
+        codeUrl: "/UnityBuilds/ScaleTrainerV2WebGL/Build/ScaleTrainerV2WebGL.wasm",
+        streamingAssetsUrl: "/UnityBuilds/ScaleTrainerV2WebGL/StreamingAssets",
+        companyName: "GLS",
+        productName: "ScaleTrainerV2WebGL",
+        productVersion: "1.0"
+      };
+
+      createUnityInstance(canvas, config)
+        .then(function(instance) {
+          window.unityInstance = instance;
+          window.__UNITY_READY__ = true;
+          unityStatusEl.textContent = 'Unity: ready';
+          canvas.focus();
+          if (window.WebMidiBridge && typeof window.WebMidiBridge.setUnityInstance === 'function') {
+            // Explicitly set the Unity target GameObject name to match the build
+            if (typeof window.WebMidiBridge.setTargetObjectName === 'function') {
+              window.WebMidiBridge.setTargetObjectName('WebGLReceiver');
+            }
+            window.WebMidiBridge.setUnityInstance(instance);
+          }
+        })
+        .catch(function(err) {
+          unityStatusEl.textContent = 'Unity: failed to load';
+          console.error('Unity failed:', err);
+        });
+    })();
+
+    // MIDI UI
+    document.getElementById('enable-midi').addEventListener('click', async () => {
+      if (!window.WebMidiBridge || typeof window.WebMidiBridge.initWebMIDI !== 'function') {
+        console.error('WebMidiBridge not available');
+        midiStatusEl.textContent = 'MIDI: bridge missing';
+        return;
+      }
+      midiStatusEl.textContent = 'MIDI: initializing…';
+      try {
+        await window.WebMidiBridge.initWebMIDI();
+        midiStatusEl.textContent = 'MIDI: enabled';
+        populateInputs();
+      } catch (e) {
+        console.error('Web MIDI init failed', e);
+        midiStatusEl.textContent = 'MIDI: not supported or denied';
+      }
+    });
+
+    function populateInputs() {
+      const list = (window.WebMidiBridge.getInputs && window.WebMidiBridge.getInputs()) || [];
+      inputSelect.innerHTML = '<option value="all">All Inputs</option>';
+      for (const inp of list) {
+        const opt = document.createElement('option');
+        opt.value = inp.id;
+        opt.textContent = inp.name || inp.manufacturer || inp.id;
+        inputSelect.appendChild(opt);
+      }
+      activeDeviceEl.textContent = 'Active: ' + (window.WebMidiBridge.activeInputId || 'all');
+    }
+
+    inputSelect.addEventListener('change', (e) => {
+      const id = e.target.value;
+      if (window.WebMidiBridge && typeof window.WebMidiBridge.selectInput === 'function') {
+        window.WebMidiBridge.selectInput(id);
+        activeDeviceEl.textContent = 'Active: ' + id;
+      }
+    });
+  </script>
+</body>
+</html>

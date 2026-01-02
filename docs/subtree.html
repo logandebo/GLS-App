@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Course Viewer</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/subtreeGraph.css" />
+</head>
+<body id="subtreePage">
+  <header class="site-header">
+    <div class="site-header__left">
+      <h1 id="treeTitle">Course</h1>
+    </div>
+    <div class="site-header__right">
+      <span id="header-username" class="header-username"></span>
+      <nav>
+        <a href="courses.html" class="btn">Back to Courses</a>
+        <a href="index.html" class="btn secondary">Home</a>
+        <a href="lesson_creator.html" class="btn secondary">Lesson Creator</a>
+        <a href="my-lessons.html" class="btn secondary">My Lessons</a>
+        <a href="creator.html" class="btn secondary">Course Creator</a>
+      </nav>
+      <button id="header-switch-user" type="button" class="btn subtle">Switch user</button>
+    </div>
+  </header>
+  <main class="container" style="padding:1rem;">
+    <section id="overviewSection" class="card" style="margin-bottom:1rem;"></section>
+    <div style="display:grid; grid-template-columns: 2fr 1fr; gap:1rem; align-items:start;">
+      <section>
+        <h2>Graph</h2>
+        <div id="graphContainer"></div>
+        <div class="graph-controls">
+          <button id="fitBtn" class="btn secondary" type="button">Fit</button>
+        </div>
+        <p id="nodesEmpty" class="empty-state hidden">No nodes in this tree.</p>
+        <p id="notFoundMsg" class="empty-state hidden">Course not found or unpublished. <a href="courses.html" class="btn secondary">Back to Courses</a></p>
+      </section>
+      <aside class="card">
+        <h3>Progress</h3>
+        <p id="progressSummary" class="short"></p>
+        <div class="actions" style="margin-top:0.5rem; display:flex; gap:0.5rem;">
+          <button id="continueBtn" class="btn" type="button">Continue</button>
+        </div>
+      </aside>
+    </div>
+  </main>
+  <!-- Intro Video Modal -->
+  <div id="introModal" class="modal hidden">
+    <div class="modal__dialog modal__dialog--wide">
+      <div class="modal__header"><h3>Course Intro</h3></div>
+      <div class="modal__body">
+        <div id="introVideoPort" class="video-port" style="margin:0 auto;"></div>
+      </div>
+      <div class="modal__footer">
+        <button id="introCloseBtn" class="btn secondary" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="js/subtree.js"></script>
+</body>
+</html>

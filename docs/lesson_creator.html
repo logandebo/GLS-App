@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Lesson Creator Wizard</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/components.css" />
+</head>
+<body id="lessonCreatorPage">
+  <header class="site-header">
+    <div class="site-header__left"><h1>Lesson Creator</h1></div>
+    <div class="site-header__right">
+      <span id="lc-header-username" class="header-username"></span>
+      <a href="courses.html" class="btn">Courses</a>
+      <a href="index.html" class="btn">Home</a>
+      <a href="creator.html" class="btn secondary">Course Creator</a>
+      <a href="my-lessons.html" class="btn secondary">My Lessons</a>
+      <button id="lc-switch-user" type="button" class="btn subtle">Switch user</button>
+    </div>
+  </header>
+  <main class="creator-main" style="padding:1rem; max-width:960px; margin:0 auto;">
+    <nav id="lc-steps" class="creator-steps" aria-label="Creation steps">
+      <button type="button" data-step="1" class="creator-step-btn active">1. Concept</button>
+      <button type="button" data-step="2" class="creator-step-btn" disabled>2. Basics</button>
+      <button type="button" data-step="3" class="creator-step-btn" disabled>3. Content</button>
+      <button type="button" data-step="4" class="creator-step-btn" disabled>4. Review</button>
+    </nav>
+    <section id="lc-step-1" class="creator-step card" data-step="1">
+      <h2>Select or Create Concept</h2>
+      <div class="field-group">
+        <label for="lc-conceptSelect">Existing concepts</label>
+        <input id="lc-conceptSearch" class="input" type="text" placeholder="Search concepts…" style="margin-bottom:0.5rem;" />
+        <select id="lc-conceptSelect"></select>
+      </div>
+      <div class="divider">or create new concept</div>
+      <div class="grid-two">
+        <label>Concept ID <input id="lc-conceptId" type="text" /></label>
+        <label>Title <input id="lc-conceptTitle" type="text" /></label>
+        <label>Subject <input id="lc-conceptSubject" type="text" /></label>
+        <label>Thumbnail URL <input id="lc-conceptThumb" type="url" /></label>
+      </div>
+      <div class="actions">
+        <button id="lc-conceptSaveBtn" type="button" class="btn secondary">Add Concept</button>
+        <button id="lc-toStep2" type="button" class="btn" disabled>Next: Basics</button>
+      </div>
+      <p id="lc-conceptErrors" class="error-text"></p>
+    </section>
+    <section id="lc-step-2" class="creator-step card hidden" data-step="2">
+      <h2>Lesson Basics</h2>
+      <div class="grid-two">
+        <label>Title <input id="lc-lessonTitle" type="text" /></label>
+        <label>Description <textarea id="lc-lessonDesc" rows="3"></textarea></label>
+        <label>Difficulty
+          <select id="lc-lessonDifficulty">
+            <option value="beginner">Beginner</option>
+            <option value="intermediate">Intermediate</option>
+            <option value="advanced">Advanced</option>
+          </select>
+        </label>
+        <label>Type
+          <select id="lc-lessonType">
+            <option value="video">Video</option>
+            <option value="unity_game">Unity Game</option>
+            <option value="external_link">External Links + Preview</option>
+            <option value="quiz">Quiz</option>
+            <option value="keyboard_lesson">Keyboard Lesson</option>
+          </select>
+        </label>
+      </div>
+      <div class="actions">
+        <button id="lc-backTo1" type="button" class="btn secondary">Back</button>
+        <button id="lc-toStep3" type="button" class="btn" disabled>Next: Content</button>
+      </div>
+      <p id="lc-basicsErrors" class="error-text"></p>
+    </section>
+    <section id="lc-step-3" class="creator-step card hidden" data-step="3">
+      <h2>Type-Specific Content</h2>
+      <div id="lc-contentConfigPanel"></div>
+      <div class="actions">
+        <button id="lc-backTo2" type="button" class="btn secondary">Back</button>
+        <button id="lc-toStep4" type="button" class="btn" disabled>Next: Review</button>
+      </div>
+      <p id="lc-contentErrors" class="error-text"></p>
+    </section>
+    <section id="lc-step-4" class="creator-step card hidden" data-step="4">
+      <h2>Review & Publish</h2>
+      <div id="lc-reviewSummary" class="review-summary"></div>
+      <div class="actions">
+        <button id="lc-backTo3" type="button" class="btn secondary">Back</button>
+        <button id="lc-publishLesson" type="button" class="btn" disabled>Publish Lesson</button>
+      </div>
+      <p id="lc-publishErrors" class="error-text"></p>
+    </section>
+  </main>
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="js/lessonCreator.js"></script>
+</body>
+</html>

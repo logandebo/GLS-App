@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Lessons – Learning Hub</title>
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/components.css" />
+    <style>
+        .ml-layout { display:grid; gap:1rem; grid-template-columns: 1fr 1fr; align-items:start; padding:1rem; max-width:1200px; margin:0 auto; }
+        .ml-list .row { display:grid; grid-template-columns: 1fr auto auto auto; align-items:center; gap:0.5rem; padding:0.5rem; border:1px solid #2e3940; border-radius:8px; background:#1f2428; }
+        .ml-editor label { font-size:0.75rem; display:flex; flex-direction:column; gap:0.25rem; }
+        .ml-editor input, .ml-editor textarea, .ml-editor select { background:#111827; border:1px solid #374151; color:#e5e7eb; padding:0.45rem 0.55rem; border-radius:0.5rem; font-size:0.85rem; }
+        .ml-editor .grid-two { display:grid; gap:0.6rem; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
+        .ml-editor .actions { display:flex; gap:0.6rem; margin-top:0.75rem; }
+        .ml-quiz-q { background:#1b2126; padding:0.6rem; border-radius:6px; border:1px solid #2e3940; margin-top:0.5rem; }
+        .ml-quiz-q .choice { display:flex; gap:0.4rem; align-items:center; margin-top:0.3rem; }
+        /* Grid view for lesson cards */
+        .ml-list .grid-cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap:0.75rem; }
+        .ml-card { padding:0.75rem; border:1px solid #2e3940; border-radius:8px; background:#1f2428; display:flex; flex-direction:column; gap:0.5rem; }
+        .ml-card .title { font-weight:600; }
+        .ml-card .meta { font-size:0.8rem; opacity:.75; }
+        .ml-card .actions { display:flex; gap:0.35rem; }
+        /* Keep the editor panel visible while scrolling */
+        .ml-editor { position: sticky; top: 4.5rem; align-self: start; max-height: calc(100vh - 6rem); overflow: auto; }
+        @media (max-width: 900px){
+            /* On smaller screens, stack layout; disable sticky to avoid overlap */
+            .ml-layout { grid-template-columns: 1fr; }
+            .ml-editor { position: static; max-height: none; }
+        }
+    </style>
+    </head>
+<body id="myLessonsPage">
+    <header class="site-header">
+        <div class="site-header__left">
+            <h1 class="site-title">Learning Hub — My Lessons</h1>
+        </div>
+        <div class="site-header__right">
+            <span id="header-username" class="header-username"></span>
+            <a href="courses.html" class="btn">Courses</a>
+            <a href="index.html" class="btn secondary">Home</a>
+            <a href="creator.html" class="btn secondary">Course Creator</a>
+            <a href="lesson_creator.html" class="btn secondary">Lesson Creator</a>
+            <a href="my-lessons.html" class="btn secondary">My Lessons</a>
+            <a href="master_lessons.html" class="btn secondary">Master Lessons</a>
+            <button id="header-switch-user" type="button" class="btn subtle">Switch user</button>
+        </div>
+    </header>
+    <main class="ml-layout">
+        <section class="ml-list">
+            <h2>Published By You</h2>
+            <div class="ml-controls" style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem;">
+                <input id="ml-search" type="text" placeholder="Search lessons..." style="flex:1;" />
+                <select id="ml-filter-type">
+                    <option value="all">All types</option>
+                    <option value="video">Video</option>
+                    <option value="unity_game">Unity Game</option>
+                    <option value="external_link">External Link</option>
+                    <option value="quiz">Quiz</option>
+                    <option value="keyboard_lesson">Keyboard Lesson</option>
+                </select>
+                <div style="margin-left:auto; display:flex; gap:0.25rem; align-items:center;">
+                    <span class="short muted">View:</span>
+                    <button id="ml-view-list" type="button" class="btn secondary">List</button>
+                    <button id="ml-view-grid" type="button" class="btn secondary">Grid</button>
+                </div>
+            </div>
+            <div id="lessonList" class="grid" style="grid-template-columns:1fr; gap:0.5rem;"></div>
+        </section>
+        <section class="ml-editor card">
+            <h2 id="editorTitle">Edit Lesson</h2>
+            <div class="grid-two">
+                <label>Lesson ID (read-only)
+                    <input id="e_id" type="text" readonly />
+                </label>
+                <label>Concept
+                    <select id="e_concept"></select>
+                </label>
+                <label>Title
+                    <input id="e_title" type="text" />
+                </label>
+                <label>Minutes
+                    <input id="e_minutes" type="number" min="1" />
+                </label>
+                <label>Difficulty
+                    <select id="e_difficulty">
+                        <option value="beginner">Beginner</option>
+                        <option value="intermediate">Intermediate</option>
+                        <option value="advanced">Advanced</option>
+                    </select>
+                </label>
+                <label>XP Reward
+                    <input id="e_xp" type="number" min="0" />
+                </label>
+                <label>Type
+                    <select id="e_type">
+                        <option value="video">Video</option>
+                        <option value="unity_game">Unity Game</option>
+                        <option value="external_link">External Links + Preview</option>
+                        <option value="quiz">Quiz</option>
+                        <option value="keyboard_lesson">Keyboard Lesson</option>
+                    </select>
+                </label>
+            </div>
+            <label>Description
+                <textarea id="e_desc" rows="3"></textarea>
+            </label>
+            <div id="typeSpecific"></div>
+            <div class="actions">
+                <button id="saveBtn" class="btn">Save Changes</button>
+                <button id="discardBtn" class="btn secondary">Discard</button>
+            </div>
+            <p id="editErrors" class="error-text"></p>
+        </section>
+    </main>
+    <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+    <script type="module" src="js/myLessons.js"></script>
+</body>
+</html>

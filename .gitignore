@@ -1,0 +1,16 @@
+# GitHub Pages-friendly ignores
+docs/UnityBuilds/
+docs/assets/video/
+**/*.mp4
+**/*.mov
+**/*.zip
+**/*.7z
+**/*.rar
+**/*.iso
+**/*.wasm
+**/*.data
+**/*.unityweb
+node_modules/
+Thumbs.db
+Desktop.ini
+.DS_Store

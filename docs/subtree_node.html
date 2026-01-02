@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Subtree Node</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/components.css" />
+</head>
+<body id="subtreeNodePage">
+  <header class="site-header">
+    <div class="site-header__left">
+      <h1 id="conceptTitle">Concept</h1>
+    </div>
+    <div class="site-header__right">
+      <span id="header-username" class="header-username"></span>
+      <nav>
+        <a id="backToCourse" href="courses.html" class="btn">Back to Course</a>
+        <a href="index.html" class="btn secondary">Home</a>
+        <a href="lesson_creator.html" class="btn secondary">Lesson Creator</a>
+        <a href="my-lessons.html" class="btn secondary">My Lessons</a>
+        <a href="creator.html" class="btn secondary">Course Creator</a>
+      </nav>
+      <button id="header-switch-user" type="button" class="btn subtle">Switch user</button>
+    </div>
+  </header>
+  <main class="container" style="padding:1rem; display:grid; grid-template-columns: 1fr; gap:1rem; align-items:start;">
+    <section id="subtreeLessonsSection" class="card subtle" style="grid-column: 1 / 2;">
+      <h3>Lessons for This Subtree</h3>
+      <p class="short muted" id="subtreeLessonsEmpty">No subtree-specific lessons yet.</p>
+      <!-- Use a simple vertical container so steps stack top-to-bottom -->
+      <div id="subtreeLessonsList"></div>
+    </section>
+    <details id="allLessonsSection" class="card subtle" style="grid-column: 1 / 2;">
+      <summary style="cursor:pointer;">All Lessons for This Concept</summary>
+      <div style="margin-top:0.5rem;">
+        <p class="short muted" id="allLessonsEmpty">No lessons found for this concept.</p>
+        <div id="allLessonsList" class="card-grid fixed-card-grid"></div>
+      </div>
+    </details>
+  </main>
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="js/subtree_node.js"></script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Lesson Player (Subtree)</title>
+	<link rel="stylesheet" href="css/styles.css" />
+	<link rel="stylesheet" href="css/components.css" />
+		<style>
+			/* Simple two-column layout inspired by Udemy */
+			.lesson-layout { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: start; }
+			.lesson-layout.collapsed { grid-template-columns: 1fr 56px; }
+			@media (max-width: 900px) { .lesson-layout, .lesson-layout.collapsed { grid-template-columns: 1fr; } }
+			.lesson-main { display: flex; flex-direction: column; gap: 12px; }
+			.lesson-sidebar { background: #0f172a; border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 10px; }
+			.lesson-sidebar.collapsed { padding: 8px; }
+			.lesson-sidebar h3 { margin: 0 0 8px 0; font-size: 1rem; }
+			.lesson-sidebar__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+			.lesson-sidebar__toggle { font-size: 0.8rem; padding: 4px 8px; }
+			.lesson-sidebar__list { display: flex; flex-direction: column; gap: 6px; max-height: 70vh; overflow: auto; }
+			.lesson-sidebar.collapsed h3 { display: none; }
+			.lesson-sidebar.collapsed .lesson-sidebar__list { display: none; }
+			.lesson-sidebar__item { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 8px; border-radius: 8px; cursor: pointer; }
+			.lesson-sidebar__item:hover { background: rgba(255,255,255,0.06); }
+			.lesson-sidebar__item.active { outline: 2px solid #2563eb; outline-offset: -2px; }
+			.lesson-sidebar__icon { font-size: 1rem; }
+			.lesson-sidebar__title { font-size: 0.95rem; }
+			.lesson-sidebar__meta { font-size: 0.8rem; opacity: 0.7; }
+
+			/* Step sections inside sidebar */
+			.lesson-sidebar__step { margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px; }
+			.lesson-sidebar__step-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+			.lesson-sidebar__step-title { font-size: 0.9rem; font-weight: 600; }
+			.lesson-sidebar__step-toggle { font-size: 0.8rem; padding: 2px 6px; }
+			.lesson-sidebar__step-content { display: flex; flex-direction: column; gap: 6px; }
+			.lesson-sidebar__step-content.collapsed { display: none; }
+
+			/* Expand the game viewport: ensure no internal scrollbars */
+			html, body { height: 100%; }
+			#lessonContainer { min-height: calc(100vh - 220px); display:flex; flex-direction: column; align-items:center; justify-content:flex-start; padding-top: 12px; }
+			/* When completed, reduce container height so summary is higher */
+			body.lesson-completed #lessonContainer { min-height: 40vh; }
+			/* Override unity frame to fit the available viewport without scroll */
+			.unity-frame { width: 100%; max-width: 1280px; aspect-ratio: 16 / 9; height: auto; max-height: calc(100vh - 260px); min-height: 300px; overflow: hidden; display: block; cursor: default !important; margin-top: 12px; }
+			body.lesson-completed .unity-frame { height: 40vh; }
+
+			/* Simple control strip above the game */
+			.unity-controls { display:flex; gap:0.5rem; align-items:center; margin:0.5rem 0; }
+
+			/* Bottom controls aligned to the right under the port */
+			.unity-bottom-controls { width: 100%; max-width: 1280px; display:flex; justify-content:flex-end; margin-top: 8px; }
+		</style>
+</head>
+<body id="lessonPage">
+	<header class="site-header">
+		<div class="site-header__left">
+			<h1 id="lessonTitle">Lesson</h1>
+		</div>
+		<div class="site-header__right">
+			<span id="header-username" class="header-username"></span>
+			<nav>
+				<a href="index.html" class="btn">Home</a>
+				<a href="profile.html" class="btn">Profile</a>
+				<a href="lesson_creator.html" class="btn secondary">Lesson Creator</a>
+				<a href="my-lessons.html" class="btn secondary">My Lessons</a>
+				<a href="creator.html" class="btn secondary">Course Creator</a>
+			</nav>
+			<button id="header-switch-user" type="button" class="btn subtle">Switch user</button>
+		</div>
+	</header>
+	<main>
+		<!-- Page actions under the navbar, aligned left -->
+		<div class="page-actions" style="display:flex; gap:0.5rem; align-items:center; margin:0.5rem 0 0.75rem 0;">
+			<button id="backToLessonsBtn" class="btn secondary" type="button">Back to Lessons</button>
+			<button id="backToTreeBtn" class="btn secondary" type="button">Back to Tree</button>
+		</div>
+			<div id="lessonLayout" class="lesson-layout">
+				<section class="lesson-main">
+					<div id="runnerHeader" class="runner-header">
+						<div class="runner-progress">
+							<div id="runnerProgressBar" class="runner-progress__bar" style="width:0%;"></div>
+						</div>
+					</div>
+					<div id="lessonMeta" class="lesson-meta"></div>
+					<div id="lessonContainer" class="lesson-container"></div>
+					<div id="completionPanel" class="completion-panel hidden">
+						<h3>Session Summary</h3>
+						<p id="xpAwardText"></p>
+						<p id="masteryImpactText" class="short"></p>
+						<div class="actions">
+							<button id="startNextLessonBtn" class="btn">Start Next Lesson</button>
+							<button id="openNextConceptBtn" class="btn secondary">Open Next Concept</button>
+							<button id="continueBtn" class="btn subtle">Back to Lessons</button>
+						</div>
+					</div>
+				</section>
+				<aside id="subtreeSidebar" class="lesson-sidebar">
+					<div class="lesson-sidebar__header">
+						<h3>Lessons</h3>
+						<button id="subtreeSidebarToggle" class="btn subtle lesson-sidebar__toggle" type="button">Hide</button>
+					</div>
+					<div id="subtreeSidebarList" class="lesson-sidebar__list"></div>
+				</aside>
+			</div>
+	</main>
+	<!-- Playlist Modal (for lesson page) -->
+	<div id="playlistModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="playlistModalTitle">
+		<div class="modal__dialog">
+			<header class="modal__header">
+				<h3 id="playlistModalTitle">Add to Playlist</h3>
+			</header>
+			<div class="modal__body">
+				<label class="modal__label">Choose playlist
+					<select id="plSelect"></select>
+				</label>
+				<div class="modal__divider">or</div>
+				<button id="plCreateToggle" class="btn secondary" type="button">Create New Playlist</button>
+				<div id="plCreateFields" class="hidden" style="margin-top:0.6rem;">
+					<label class="modal__label">Title
+						<input id="plNewTitle" type="text" placeholder="Intro to ..." />
+					</label>
+					<label class="modal__label">Description
+						<textarea id="plNewDesc" rows="2" placeholder="My route from zero to comfort."></textarea>
+					</label>
+				</div>
+				<p id="plErr" class="error-text"></p>
+			</div>
+			<footer class="modal__footer">
+				<button id="plCancel" class="btn secondary" type="button">Cancel</button>
+				<button id="plAdd" class="btn" type="button">Add</button>
+			</footer>
+		</div>
+	</div>
+	<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+	<script type="module" src="js/player.js"></script>
+</body>
+</html>

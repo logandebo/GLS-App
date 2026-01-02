@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>User Profile</title>
+	<link rel="stylesheet" href="css/styles.css" />
+	<link rel="stylesheet" href="css/components.css" />
+</head>
+<body id="profilePage">
+	<header class="site-header">
+		<div class="site-header__left">
+			<h1>Profile</h1>
+		</div>
+		<div class="site-header__right">
+			<span id="header-username" class="header-username"></span>
+			<nav>
+				<a href="courses.html" class="btn">Courses</a>
+				<a href="index.html" class="btn">Home</a>
+				<a href="lesson_creator.html" class="btn secondary">Lesson Creator</a>
+				<a href="my-lessons.html" class="btn secondary">My Lessons</a>
+				<a href="creator.html" class="btn secondary">Course Creator</a>
+			</nav>
+			<button id="header-switch-user" type="button" class="btn subtle">Switch user</button>
+		</div>
+	</header>
+	<main>
+		<section id="profileSummary" class="profile-summary"></section>
+		<section id="focusSection" class="card" style="margin:1rem 0;">
+			<h2 style="margin-top:0;">Current Focus</h2>
+			<p class="short">Select subjects/tags to bias recommendations.</p>
+			<div id="focusChips" class="chips" style="display:flex; flex-wrap:wrap; gap:0.4rem; margin:0.4rem 0;"></div>
+			<label style="display:block; font-size:0.8rem; margin-top:0.4rem;">
+				Custom tags (comma-separated):
+				<input id="focusInput" type="text" placeholder="e.g., music, math" style="margin-left:0.5rem; width:60%;" />
+			</label>
+			<div class="actions" style="margin-top:0.6rem;">
+				<button id="focusSaveBtn" class="btn">Save Focus</button>
+				<button id="focusClearBtn" class="btn secondary">Clear</button>
+			</div>
+		</section>
+		<section>
+			<h2>Concept Mastery</h2>
+			<div id="masteryGrid" class="grid"></div>
+		</section>
+		<section id="myPlaylistsSection" class="card" style="margin-top:1rem;">
+			<div class="section-header" style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
+				<h2 style="margin:0;">My Playlists</h2>
+				<div style="display:flex; gap:0.5rem;">
+					<button id="profileImportPlaylistBtn" class="btn secondary" type="button">Import</button>
+					<input id="profileImportPlaylistInput" type="file" accept="application/json,.json" style="display:none;" />
+				</div>
+			</div>
+			<div id="myPlaylistsList" class="list"></div>
+			<p id="myPlaylistsEmpty" class="empty-state hidden">You don't have any playlists yet.</p>
+		</section>
+	</main>
+	<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+	<script type="module" src="js/profile.js"></script>
+</body>
+</html>

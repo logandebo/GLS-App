@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Gamified Learning Platform</title>
+	<link rel="stylesheet" href="css/styles.css" />
+	<link rel="stylesheet" href="css/components.css" />
+</head>
+<body id="homePage">
+	<header class="site-header">
+		<div class="site-header__left">
+			<h1 class="site-title">Learning Hub</h1>
+		</div>
+		<div class="site-header__right">
+			<span id="header-username" class="header-username"></span>
+			<div id="xpBadge" class="xp-badge" title="Total XP"></div>
+			<input id="globalSearchInput" class="search-input" type="search" placeholder="Search courses, lessons, or concepts…" aria-label="Search" />
+			<a href="courses.html" class="btn">Courses</a>
+			<!-- Goals removed for v0.1 minimal header -->
+			<button id="continueLastBtn" class="btn secondary hidden">Continue Last Lesson</button>
+			<a href="profile.html" class="btn" id="profileLink">Profile</a>
+			<a href="creator.html" class="btn secondary" id="creatorLink">Course Creator</a>
+			<a href="lesson_creator.html" class="btn secondary" id="lessonCreatorLink">Lesson Creator</a>
+			<a href="my-lessons.html" class="btn secondary" id="myLessonsLink">My Lessons</a>
+			<button id="header-switch-user" type="button" class="btn subtle">Switch user</button>
+		</div>
+	</header>
+	<main id="home-main">
+		<div id="loading-state">Loading your learning hub...</div>
+		<section id="hero-section" class="hero">
+			<h2 class="hero__title">Learn real skills through guided courses</h2>
+			<p class="hero__subtitle">Outcome-based journeys with interactive lessons and practice.</p>
+			<div class="hero__actions">
+				<a href="courses.html" class="btn">Browse Courses</a>
+				<button type="button" id="startLearningBtn" class="btn secondary">Start Learning</button>
+			</div>
+		</section>
+
+		<section id="featured-courses-section" class="featured-courses">
+			<div class="section-header">
+				<h2>Featured Courses</h2>
+				<a href="courses.html" class="btn subtle" aria-label="View all courses">View All</a>
+			</div>
+			<div id="featured-courses-grid" class="card-grid"></div>
+			<p id="featured-courses-empty" class="empty-state hidden">No courses published yet. Check back soon or explore creators' content.</p>
+		</section>
+
+		<section id="personalized-section" class="personalized hidden">
+			<div class="section-header">
+				<h2>Continue Your Journey</h2>
+			</div>
+			<div id="continue-course-content" class="card-grid"></div>
+			<p id="continue-course-empty" class="empty-state hidden">Sign in or start a course to see your progress here.</p>
+			<div class="section-header" style="margin-top:1rem;">
+				<h2>Recommended Courses</h2>
+			</div>
+			<div id="recommended-courses-content" class="card-grid"></div>
+			<p id="recommended-courses-empty" class="empty-state hidden">We’ll recommend courses once you explore a bit.</p>
+		</section>
+
+		<section id="search-explore-section" class="search-explore">
+			<div class="section-header">
+				<h2>Search & Explore</h2>
+			</div>
+			<div class="search-explore__controls">
+				<input id="homeSearchInput" class="search-input" type="search" placeholder="Search courses, lessons, or concepts…" aria-label="Search" />
+				<div class="filter-group" role="group" aria-label="Search filters">
+					<button class="chip chip--type" data-filter="courses">Courses</button>
+					<button class="chip" data-filter="lessons">Lessons</button>
+					<button class="chip" data-filter="concepts">Concepts</button>
+					<button class="chip" data-filter="creators">Creators</button>
+				</div>
+			</div>
+			<div id="search-results" class="card-grid"></div>
+			<p id="search-empty" class="empty-state hidden">No results. Try a different filter or term.</p>
+		</section>
+
+		<footer id="site-footer" class="site-footer">
+			<div class="footer-links">
+				<a href="courses.html">Courses</a>
+				<a href="profile.html">Profile</a>
+				<a href="creator.html">Course Creator Tools</a>
+			</div>
+		</footer>
+	</main>
+	<!-- Playlist Modal -->
+	<div id="playlistModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="playlistModalTitle">
+		<div class="modal__dialog">
+			<header class="modal__header">
+				<h3 id="playlistModalTitle">Add to Playlist</h3>
+			</header>
+			<div class="modal__body">
+				<label class="modal__label">Choose playlist
+					<select id="plSelect"></select>
+				</label>
+				<div class="modal__divider">or</div>
+				<button id="plCreateToggle" class="btn secondary" type="button">Create New Playlist</button>
+				<div id="plCreateFields" class="hidden" style="margin-top:0.6rem;">
+					<label class="modal__label">Title
+						<input id="plNewTitle" type="text" placeholder="Intro to ..." />
+					</label>
+					<label class="modal__label">Description
+						<textarea id="plNewDesc" rows="2" placeholder="My route from zero to comfort."></textarea>
+					</label>
+				</div>
+				<p id="plErr" class="error-text"></p>
+			</div>
+			<footer class="modal__footer">
+				<button id="plCancel" class="btn secondary" type="button">Cancel</button>
+				<button id="plAdd" class="btn" type="button">Add</button>
+			</footer>
+		</div>
+	</div>
+	<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+	<script type="module" src="js/home.js"></script>
+</body>
+</html>

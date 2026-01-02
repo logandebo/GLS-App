@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Master Lessons Controller</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <style>
+    .mlc-layout { padding: 1rem; max-width: 1200px; margin: 0 auto; }
+    .mlc-toolbar { display:flex; gap:0.5rem; align-items:center; margin-bottom:0.75rem; }
+    .mlc-list { display:grid; gap:0.5rem; grid-template-columns: 1fr; }
+    .mlc-row { display:grid; gap:0.5rem; grid-template-columns: 1fr auto; align-items:start; border:1px solid #2e3940; border-radius:8px; background:#1f2428; padding:0.75rem; }
+    .mlc-row__left { display:grid; gap:0.35rem; }
+    .mlc-row__title { font-weight:600; }
+    .mlc-row__meta { opacity:.8; font-size:.8rem; }
+    .mlc-row__actions { display:flex; gap:0.5rem; flex-wrap:wrap; }
+    .mlc-owner { display:flex; gap:0.5rem; align-items:center; }
+    .mlc-json { background:#0f172a; color:#e5e7eb; padding:0.5rem; border-radius:6px; border:1px solid #1f2937; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:0.85rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body id="masterLessonsPage">
+  <header class="site-header">
+    <div class="site-header__left"><h1>Master Lessons Controller</h1></div>
+    <div class="site-header__right">
+      <span id="header-username" class="header-username"></span>
+      <a href="index.html" class="btn">Home</a>
+      <a href="my-lessons.html" class="btn secondary">My Lessons</a>
+      <button id="header-switch-user" type="button" class="btn subtle">Switch user</button>
+    </div>
+  </header>
+  <main class="mlc-layout">
+    <div class="mlc-toolbar">
+      <span class="hint-text">Manage all custom lessons stored in this browser.</span>
+      <button id="mlc-refresh" class="btn secondary" type="button">Refresh</button>
+    </div>
+    <section>
+      <h2>All Custom Lessons</h2>
+      <div id="mlc-list" class="mlc-list"></div>
+      <p id="mlc-empty" class="hint-text" style="display:none;">No lessons found.</p>
+    </section>
+  </main>
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="js/masterLessons.js"></script>
+</body>
+</html>

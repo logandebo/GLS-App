@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<title>Sign In – Learning Hub</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<link rel="stylesheet" href="css/styles.css" />
+	<link rel="stylesheet" href="css/components.css" />
+</head>
+<body>
+	<header class="site-header">
+		<h1 class="site-title">Learning Hub</h1>
+	</header>
+	<main class="auth-main">
+		<section class="auth-card">
+			<h2>Welcome</h2>
+			<p>Enter a username to start or continue your learning journey.</p>
+			<form id="auth-form">
+				<label for="auth-username">Username</label>
+				<input id="auth-username" name="username" type="text" required autocomplete="off" />
+				<button type="submit">Continue</button>
+			</form>
+			<div id="auth-user-list" class="auth-user-list"></div>
+		</section>
+	</main>
+	<script type="module" src="js/auth.js"></script>
+</body>
+</html>

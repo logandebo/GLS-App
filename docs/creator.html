@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Creator Subtree Builder</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/subtreeGraph.css" />
+</head>
+<body id="creatorPage">
+  <header class="site-header">
+    <div class="site-header__left"><h1>Creator Tree Builder</h1></div>
+    <div class="site-header__right">
+      <span id="header-username" class="header-username"></span>
+      <nav>
+        <a href="index.html" class="btn">Home</a>
+        <a href="courses.html" class="btn">Courses</a>
+        <a href="profile.html" class="btn">Profile</a>
+        <a href="lesson_creator.html" class="btn secondary" title="Create custom lessons">Lesson Creator</a>
+        <a href="my-lessons.html" class="btn secondary">My Lessons</a>
+      </nav>
+      <button id="header-switch-user" type="button" class="btn subtle">Switch user</button>
+    </div>
+  </header>
+  <main class="layout-two-col" style="display:flex; gap:1rem; align-items:flex-start;">
+    <section style="flex:1;" class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+		<h2>Tree Editor (Branching)</h2>
+        <select id="treeSelect" class="input" title="Select existing tree"></select>
+      </div>
+      <div id="treeMeta" style="margin-top:0.5rem;">
+        <label class="modal__label">Title
+          <input id="treeTitle" type="text" placeholder="Algebra Essentials" />
+        </label>
+        <label class="modal__label">Description
+          <textarea id="treeDesc" rows="2" placeholder="A focused progression."></textarea>
+        </label>
+        <label class="modal__label">Primary Domain
+          <input id="treeDomain" type="text" placeholder="math" />
+        </label>
+        <label class="modal__label">Tags (comma separated)
+          <input id="treeTags" type="text" placeholder="algebra, fundamentals" />
+        </label>
+      </div>
+      <div style="margin-top:0.75rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <button id="newTreeBtn" class="btn secondary" type="button">New Tree</button>
+        <button id="saveTreeBtn" class="btn" type="button">Save Tree</button>
+        <button id="deleteTreeBtn" class="btn secondary" type="button">Delete Tree</button>
+        <button id="exportTreeBtn" class="btn subtle" type="button">Export</button>
+        <button id="importTreeBtn" class="btn subtle" type="button">Import</button>
+        <input id="importTreeInput" type="file" accept="application/json" style="display:none;" />
+      </div>
+      <div style="margin-top:0.5rem; display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+        <button id="publishTreeBtn" class="btn" type="button" title="Publish to Courses">Publish</button>
+        <button id="unpublishTreeBtn" class="btn secondary" type="button" title="Remove from Courses">Unpublish</button>
+        <label style="display:flex; gap:0.4rem; align-items:center;">
+          <span>Mode:</span>
+          <select id="editorMode" class="input" style="min-width:160px;">
+            <option value="form">Form Editor</option>
+            <option value="visual">Visual Editor</option>
+          </select>
+        </label>
+        <button id="autoLayoutBtn" class="btn secondary" type="button" title="Auto-layout nodes">Auto-layout</button>
+        <button id="fitGraphBtn" class="btn subtle" type="button" title="Fit graph">Fit</button>
+        <button id="saveLayoutBtn" class="btn subtle" type="button" title="Persist current node positions">Save Layout</button>
+        <label style="display:flex; gap:0.4rem; align-items:center;">
+          <input id="snapToggle" type="checkbox" checked />
+          <span>Snap</span>
+        </label>
+      </div>
+      <div id="visualEditor" class="card subtle hidden" style="margin-top:0.75rem;">
+        <h3>Visual Editor</h3>
+        <div style="display:grid; grid-template-columns: 2fr 1fr; gap:0.75rem; align-items:start; margin-top:0.5rem;">
+          <div>
+            <div id="creatorGraphContainer"></div>
+          </div>
+          <aside id="inspectorPanel" class="card subtle">
+            <h4>Inspector</h4>
+            <p id="insSelTitle" class="short">No node selected</p>
+            <p id="insSelId" class="short muted"></p>
+            <div id="insBoundRow" class="short hidden"></div>
+            <div style="margin-top:0.5rem;">
+              <label class="modal__label">Link to Concept
+                <input id="insSearchInput" class="input" type="text" placeholder="Search concepts..." />
+              </label>
+              <div id="insResults" class="vertical-list" style="max-height:220px; overflow:auto; margin-top:0.5rem;"></div>
+              <p id="insBindMsg" class="short muted"></p>
+              <h5 style="margin-top:0.75rem;">Current Links</h5>
+              <div id="insCurrentLinks" class="vertical-list" style="max-height:160px; overflow:auto;"></div>
+            </div>
+            <hr style="margin:0.75rem 0; border:none; border-top:1px solid #2e3940;" />
+            <div id="insLessonSelect">
+              <h5>Subtree Lessons (Select Existing)</h5>
+              <p id="insLessonsEmpty" class="short muted">Bind a concept to select lessons.</p>
+              <div style="display:grid; grid-template-columns: 1fr; gap:0.5rem;">
+                <label class="modal__label">Search Lessons for Concept
+                  <input id="insLessonsSearchInput" class="input" type="text" placeholder="Search lessons..." />
+                </label>
+                <div id="insLessonsResults" class="vertical-list" style="max-height:200px; overflow:auto;"></div>
+                <div>
+                  <h6 style="margin-top:0.5rem;">Selected Lessons</h6>
+                  <div id="insLessonsSelected" class="vertical-list" style="max-height:160px; overflow:auto;"></div>
+                </div>
+              </div>
+            </div>
+            <div style="margin-top:0.75rem; display:flex; justify-content:flex-start;">
+              <button id="insDeleteBtn" type="button" class="btn secondary">Delete Node</button>
+            </div>
+          </aside>
+        </div>
+      </div>
+        <!-- Moved Search Concepts below Visual Editor and above Sequence -->
+        <section class="card" style="margin-top:0.75rem;">
+          <h2>Search Concepts</h2>
+          <input id="searchInput" type="text" placeholder="Search concepts..." class="input" />
+          <div id="searchResults" class="vertical-list" style="margin-top:0.75rem;"></div>
+        </section>
+        <section class="card" style="margin-top:0.75rem;">
+          <h2>Course Intro Video</h2>
+          <p class="short">Upload an optional intro/explainer video for learners.</p>
+          <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+            <input id="introVideoInput" type="file" accept="video/*" />
+            <button id="introVideoUploadBtn" class="btn" type="button">Upload</button>
+            <button id="introVideoClearBtn" class="btn secondary" type="button">Remove</button>
+          </div>
+          <div id="introVideoPreview" class="short muted" style="margin-top:0.5rem;"></div>
+        </section>
+        <section class="card" style="margin-top:0.75rem;">
+          <h2>New Concept</h2>
+          <div class="grid-two">
+            <label class="modal__label">Title
+              <input id="newConceptTitle" type="text" placeholder="e.g., Linear Equations" />
+            </label>
+            <label class="modal__label">Subject/Domain
+              <input id="newConceptSubject" type="text" placeholder="e.g., Math" />
+            </label>
+            <label class="modal__label">Tags (comma separated)
+              <input id="newConceptTags" type="text" placeholder="algebra, linear" />
+            </label>
+          </div>
+          <div style="margin-top:0.5rem; display:flex; gap:0.5rem;">
+            <button id="createConceptBtn" class="btn" type="button">Create & Add to Tree</button>
+            <p id="createConceptMsg" class="short muted" style="margin:0;"></p>
+          </div>
+        </section>
+      <div style="margin-top:1rem; display:flex; align-items:center; gap:0.75rem;">
+        <h3 style="margin:0;">Sequence</h3>
+        <label style="display:flex; gap:0.4rem; align-items:center;">
+          <input id="sequenceLinearToggle" type="checkbox" />
+          <span>Linear linking</span>
+        </label>
+      </div>
+      <p id="sequenceEmpty" class="empty-state">No concepts added yet.</p>
+      <div id="sequenceList" class="vertical-list"></div>
+      <p id="validationErrors" class="error-text" style="margin-top:0.75rem;"></p>
+
+			<div id="unlockEditor" class="card subtle hidden" style="margin-top:1rem;">
+				<h3>Unlock Conditions</h3>
+				<p id="unlockTarget" class="short" style="margin-bottom:0.5rem;"></p>
+				<label class="modal__label">Required Concept IDs (comma)
+					<input id="unlockRequiredIds" type="text" placeholder="concept_a, concept_b" />
+				</label>
+				<label class="modal__label">Minimum Mastery Badge
+					<select id="unlockMinBadge">
+						<option value="none">None</option>
+						<option value="bronze">Bronze</option>
+						<option value="silver">Silver</option>
+						<option value="gold">Gold</option>
+					</select>
+				</label>
+				<div style="margin-top:0.5rem; display:flex; gap:0.5rem;">
+					<button id="unlockSaveBtn" type="button" class="btn">Save Conditions</button>
+					<button id="unlockCancelBtn" type="button" class="btn secondary">Cancel</button>
+				</div>
+				<p id="unlockErr" class="error-text" style="margin-top:0.5rem;"></p>
+			</div>
+
+			<div id="linkEditor" class="card subtle hidden" style="margin-top:1rem;">
+				<h3>Node Links (Branching)</h3>
+				<p id="linkTarget" class="short" style="margin-bottom:0.5rem;"></p>
+				<div id="linkOptions" class="vertical-list" style="max-height:200px; overflow:auto; margin-bottom:0.5rem;"></div>
+				<div style="display:flex; gap:0.5rem;">
+					<button id="linkSaveBtn" type="button" class="btn">Save Links</button>
+					<button id="linkCancelBtn" type="button" class="btn secondary">Cancel</button>
+				</div>
+				<p id="linkErr" class="error-text" style="margin-top:0.5rem;"></p>
+			</div>
+			<h3 style="margin-top:1.25rem;">Your Trees</h3>
+			<div id="treeList" class="vertical-list"></div>
+    </section>
+  </main>
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="js/creator.js"></script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Goals & Learning Path</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/components.css" />
+</head>
+<body id="goalsPage">
+  <header class="site-header">
+    <div class="site-header__left">
+      <h1>Goals & Path</h1>
+    </div>
+    <div class="site-header__right">
+      <span id="header-username" class="header-username"></span>
+      <nav>
+        <a href="courses.html" class="btn">Courses</a>
+        <a href="index.html" class="btn">Home</a>
+        <a href="profile.html" class="btn secondary">Profile</a>
+      </nav>
+      <button id="header-switch-user" type="button" class="btn subtle">Switch user</button>
+    </div>
+  </header>
+  <main class="container" style="padding: 1rem;">
+    <section class="card" style="margin-bottom:1rem;">
+      <h2 style="margin-top:0;">Plan Your Path</h2>
+      <div class="grid two">
+        <div>
+          <label class="block">Start From
+            <select id="startSelect" class="input" style="width:100%; margin-top:0.25rem;"></select>
+          </label>
+        </div>
+        <div>
+          <label class="block">Skip Gold Concepts by Default
+            <input id="skipGoldToggle" type="checkbox" checked style="margin-left:0.5rem;" />
+          </label>
+        </div>
+      </div>
+      <div style="margin-top:0.75rem;">
+        <label class="block">Search Goals</label>
+        <input id="goalSearch" type="text" placeholder="Search concepts..." class="input" />
+        <div id="searchResults" class="list" style="margin-top:0.5rem;"></div>
+      </div>
+      <div style="margin-top:0.75rem;">
+        <label class="block">Recommended Goals</label>
+        <div id="recommendedGoals" class="list"></div>
+      </div>
+      <div style="margin-top:0.75rem;">
+        <label class="block">Selected Goals</label>
+        <div id="selectedGoals" class="chips" style="display:flex; flex-wrap:wrap; gap:0.4rem;"></div>
+      </div>
+      <div class="actions" style="margin-top:0.75rem;">
+        <button id="generateBtn" class="btn">Generate Path</button>
+      </div>
+    </section>
+
+    <section id="pathSection" class="card hidden">
+      <h2 style="margin-top:0;">Suggested Route</h2>
+      <div id="miniRoute" class="mini-route" style="display:flex; flex-wrap:wrap; gap:0.4rem; align-items:center;"></div>
+      <div id="pathSummary" class="short" style="margin-top:0.5rem;"></div>
+      <div id="pathSteps" class="list" style="margin-top:0.75rem;"></div>
+      <div class="actions" style="margin-top:0.75rem;">
+        <button id="savePlaylistBtn" class="btn secondary">Save Path as Playlist</button>
+      </div>
+    </section>
+  </main>
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="js/goals.js"></script>
+</body>
+</html>

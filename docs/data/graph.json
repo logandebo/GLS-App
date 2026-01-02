@@ -1,0 +1,103 @@
+{
+	"concepts": [
+		{
+			"id": "music.c_major_scale",
+			"title": "C Major Scale",
+			"shortDescription": "Learn the basic C major scale.",
+			"longDescription": "C major has 7 white keys: C D E F G A B.",
+			"subject": "Music",
+			"tags": ["scale", "beginner"],
+			"difficulty": 2,
+			"estimatedMinutesToBasicMastery": 30,
+			"nodeType": "skill",
+			"thumbnail": "assets/img/thumb_music_c_major.png",
+			"lessonIds": [
+				"lesson.c_major_scale.intro_video",
+				"lesson.c_major_scale.quiz_basic",
+				"lesson.c_major_scale.game_clicker"
+			]
+		},
+		{
+			"id": "music.g_major_scale",
+			"title": "G Major Scale",
+			"shortDescription": "Learn the G major scale (one sharp).",
+			"longDescription": "G major contains one sharp: F#. Notes are G A B C D E F#.",
+			"subject": "Music",
+			"tags": ["scale", "beginner"],
+			"difficulty": 2,
+			"estimatedMinutesToBasicMastery": 30,
+			"nodeType": "skill",
+			"thumbnail": "assets/img/thumb_music_g_major.png",
+			"lessonIds": [
+				"lesson.g_major_scale.intro_video",
+				"lesson.g_major_scale.quiz_basic",
+				"lesson.g_major_scale.game_clicker"
+			]
+		}
+		,
+		{
+			"id": "music.rhythm_basics",
+			"title": "Rhythm Basics",
+			"shortDescription": "Learn beats, measures, and note values.",
+			"longDescription": "Start with the pulse, understand time signatures like 4/4, and read basic note values (quarter, half, whole).",
+			"subject": "Music",
+			"tags": ["rhythm", "beginner"],
+			"difficulty": 1,
+			"estimatedMinutesToBasicMastery": 20,
+			"nodeType": "skill",
+			"thumbnail": "assets/img/thumb_music_rhythm.png",
+			"lessonIds": [
+				"lesson.rhythm_basics.intro_video",
+				"lesson.rhythm_basics.quiz_basic"
+			]
+		},
+		{
+			"id": "math.fractions_basics",
+			"title": "Fractions Basics",
+			"shortDescription": "Understand numerator, denominator, and simple equivalence.",
+			"longDescription": "Learn how to interpret fractions, compare simple fractions, and understand equivalence like 1/2 = 2/4.",
+			"subject": "Math",
+			"tags": ["fractions", "beginner"],
+			"difficulty": 1,
+			"estimatedMinutesToBasicMastery": 25,
+			"nodeType": "skill",
+			"thumbnail": "assets/img/thumb_math_fractions.png",
+			"lessonIds": [
+				"lesson.fractions_basics.intro_video",
+				"lesson.fractions_basics.quiz_basic"
+			]
+		}
+	],
+	"relationships": [
+		{
+			"from": "music.c_major_scale",
+			"to": "music.scales_basic",
+			"type": "PART_OF",
+			"strength": 0.8
+		},
+		{
+			"from": "music.g_major_scale",
+			"to": "music.scales_basic",
+			"type": "PART_OF",
+			"strength": 0.8
+		},
+		{
+			"from": "music.g_major_scale",
+			"to": "music.c_major_scale",
+			"type": "RELATED_TO",
+			"strength": 0.5
+		},
+		{
+			"from": "music.rhythm_basics",
+			"to": "music.rhythm_basic",
+			"type": "PART_OF",
+			"strength": 0.7
+		},
+		{
+			"from": "math.fractions_basics",
+			"to": "math.arithmetic_basic",
+			"type": "PART_OF",
+			"strength": 0.7
+		}
+	]
+}

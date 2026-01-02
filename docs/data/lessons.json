@@ -1,0 +1,195 @@
+{
+	"lessons": [
+		{
+			"id": "lesson.c_major_scale.intro_video",
+			"conceptId": "music.c_major_scale",
+			"title": "Intro to C Major",
+			"summary": "Short video showing the C major scale.",
+			"contentType": "video",
+			"difficulty": 2,
+			"estimatedMinutes": 10,
+			"xpReward": 40,
+			"media": {
+				"videoUrl": "assets/video/c_major_intro.mp4",
+				"thumbnail": "assets/img/thumb_music_c_major.png"
+			}
+		},
+		{
+			"id": "lesson.c_major_scale.quiz_basic",
+			"conceptId": "music.c_major_scale",
+			"title": "C Major Quiz",
+			"summary": "Check your understanding.",
+			"contentType": "quiz",
+			"difficulty": 2,
+			"estimatedMinutes": 5,
+			"xpReward": 30,
+			"quiz": {
+				"questions": [
+					{
+						"id": "q1",
+						"type": "multiple_choice",
+						"prompt": "Which is NOT in C major?",
+						"options": ["D", "E", "Bb", "G"],
+						"correctIndex": 2,
+						"explanation": "C major has no flats."
+					}
+				]
+			}
+		}
+		,
+		{
+			"id": "lesson.c_major_scale.game_clicker",
+			"conceptId": "music.c_major_scale",
+			"title": "Scale Note Clicker",
+			"summary": "Click the notes to build the C major scale.",
+			"contentType": "game",
+			"difficulty": 2,
+			"estimatedMinutes": 3,
+			"xpReward": 25,
+			"game": {
+				"targetClicks": 7,
+				"notes": ["C","D","E","F","G","A","B"]
+			}
+		},
+		{
+			"id": "lesson.g_major_scale.intro_video",
+			"conceptId": "music.g_major_scale",
+			"title": "Intro to G Major",
+			"summary": "Short video showing the G major scale.",
+			"contentType": "video",
+			"difficulty": 2,
+			"estimatedMinutes": 10,
+			"xpReward": 40,
+			"media": {
+				"videoUrl": "assets/video/c_major_intro.mp4",
+				"thumbnail": "assets/img/thumb_music_g_major.png"
+			}
+		},
+		{
+			"id": "lesson.g_major_scale.quiz_basic",
+			"conceptId": "music.g_major_scale",
+			"title": "G Major Quiz",
+			"summary": "Check your understanding of G major.",
+			"contentType": "quiz",
+			"difficulty": 2,
+			"estimatedMinutes": 5,
+			"xpReward": 30,
+			"quiz": {
+				"questions": [
+					{
+						"id": "q1",
+						"type": "multiple_choice",
+						"prompt": "Which note is sharpened in G major?",
+						"options": ["D", "F", "F#", "B"],
+						"correctIndex": 2,
+						"explanation": "G major has one sharp: F#."
+					}
+				]
+			}
+		},
+		{
+			"id": "lesson.g_major_scale.game_clicker",
+			"conceptId": "music.g_major_scale",
+			"title": "Scale Note Clicker (G)",
+			"summary": "Click the notes to build the G major scale.",
+			"contentType": "game",
+			"difficulty": 2,
+			"estimatedMinutes": 3,
+			"xpReward": 25,
+			"game": {
+				"targetClicks": 7,
+				"notes": ["G","A","B","C","D","E","F#"]
+			}
+		},
+		{
+			"id": "lesson.rhythm_basics.intro_video",
+			"conceptId": "music.rhythm_basics",
+			"title": "Intro to Rhythm Basics",
+			"summary": "Beats, measures, and common note values.",
+			"contentType": "video",
+			"difficulty": 1,
+			"estimatedMinutes": 8,
+			"xpReward": 35,
+			"media": {
+				"videoUrl": "assets/video/c_major_intro.mp4",
+				"thumbnail": "assets/img/thumb_music_rhythm.png"
+			}
+		},
+		{
+			"id": "lesson.rhythm_basics.quiz_basic",
+			"conceptId": "music.rhythm_basics",
+			"title": "Rhythm Basics Quiz",
+			"summary": "Quick check on time signatures and note values.",
+			"contentType": "quiz",
+			"difficulty": 1,
+			"estimatedMinutes": 5,
+			"xpReward": 25,
+			"quiz": {
+				"questions": [
+					{
+						"id": "q1",
+						"type": "multiple_choice",
+						"prompt": "How many beats are in a 4/4 measure?",
+						"options": ["2", "3", "4", "6"],
+						"correctIndex": 2,
+						"explanation": "In 4/4, there are four quarter-note beats per measure."
+					}
+				]
+			}
+		},
+		{
+			"id": "lesson.fractions_basics.intro_video",
+			"conceptId": "math.fractions_basics",
+			"title": "Intro to Fractions",
+			"summary": "Numerator and denominator with simple visuals.",
+			"contentType": "video",
+			"difficulty": 1,
+			"estimatedMinutes": 9,
+			"xpReward": 35,
+			"media": {
+				"videoUrl": "assets/video/c_major_intro.mp4",
+				"thumbnail": "assets/img/thumb_math_fractions.png"
+			}
+		},
+		{
+			"id": "lesson.fractions_basics.quiz_basic",
+			"conceptId": "math.fractions_basics",
+			"title": "Fractions Basics Quiz",
+			"summary": "Identify simple fractions and equivalence.",
+			"contentType": "quiz",
+			"difficulty": 1,
+			"estimatedMinutes": 5,
+			"xpReward": 25,
+			"quiz": {
+				"questions": [
+					{
+						"id": "q1",
+						"type": "multiple_choice",
+						"prompt": "If 1 of 2 equal parts is shaded, what fraction is shaded?",
+						"options": ["1/2", "1/3", "2/3", "1/4"],
+						"correctIndex": 0,
+						"explanation": "One out of two equal parts is 1/2."
+					}
+				]
+			}
+		},
+		{
+			"id": "lesson.c_major_scale.keyboard_note_id",
+			"conceptId": "music.c_major_scale",
+			"title": "Keyboard: Identify C4",
+			"description": "Play the requested key on the piano.",
+			"type": "keyboard_lesson",
+			"minutes": 3,
+			"difficulty": "beginner",
+			"xpReward": 25,
+			"contentConfig": {
+				"keyboard_lesson": {
+					"mode": "note",
+					"target": "C4",
+					"range": "C3-C5",
+					"attempts": 1
+				}
+			}
+		}
+	]
+}

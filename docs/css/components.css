@@ -1,0 +1,124 @@
+.concept-card { cursor:pointer; }
+.lesson-card { cursor:pointer; }
+.card-grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); }
+/* Fixed-width card grid for pages needing finite card size */
+.fixed-card-grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fill, minmax(320px, 320px)); justify-content:flex-start; }
+.section-header { display:flex; align-items:center; justify-content:space-between; gap:0.75rem; margin-bottom:0.5rem; }
+#lesson-preview-panel { margin-top:2rem; background:#1f2428; border:1px solid #2e3940; border-radius:8px; padding:0.75rem 0.9rem; }
+#lesson-preview-panel h2 { margin-top:0; font-size:1rem; }
+.view-toggle-button { background:#374151; border:none; color:#e6e9ec; padding:0.4rem 0.75rem; border-radius:6px; cursor:pointer; font-size:0.75rem; }
+.view-toggle-button.active { background:#2563eb; }
+.view-toggle-button:focus-visible { outline:2px solid #2563eb; outline-offset:2px; }
+.concept-map { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:1rem; }
+.concept-bubble { border-radius:999px; padding:0.75rem 0.9rem; text-align:center; cursor:pointer; border:2px solid #555; background:rgba(255,255,255,0.03); color:#e6e9ec; font-size:0.75rem; display:flex; flex-direction:column; gap:0.4rem; transition:transform 0.1s ease,border-color 0.1s ease,background 0.1s ease; }
+.concept-bubble:hover, .concept-bubble:focus-visible { transform:translateY(-1px); border-color:#fff; background:rgba(255,255,255,0.06); }
+.concept-bubble.active { border-color:#4ade80; }
+.mastery-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+.mastery-unrated { background:#6b7280; }
+.mastery-bronze { background:#b45309; }
+.mastery-silver { background:#9ca3af; }
+.mastery-gold { background:#fbbf24; }
+.concept-bubble-title { font-weight:600; font-size:0.75rem; }
+.concept-bubble-subject { font-size:0.6rem; opacity:0.7; }
+.active-concept-card { outline:2px solid #4ade80; }
+.hidden { display:none; }
+.lesson-card:hover, .concept-card:hover { outline:1px solid #2563eb; }
+.lesson-card:focus-visible, .concept-card:focus-visible { outline:2px solid #2563eb; outline-offset:2px; }
+.lesson-meta { margin-bottom:1rem; font-size:0.85rem; opacity:0.8; }
+.difficulty-icons { font-size:0.65rem; letter-spacing:1px; color:#fbbf24; }
+.card .difficulty-icons { filter: drop-shadow(0 0 2px rgba(0,0,0,0.4)); }
+.game-stub { background:#1f2428; padding:1rem; border:1px solid #2e3940; border-radius:8px; display:flex; flex-direction:column; gap:0.75rem; max-width:480px; }
+.notes-wrap { display:flex; flex-wrap:wrap; gap:0.5rem; }
+.note-btn { background:#2563eb; border:none; color:#fff; padding:0.45rem 0.7rem; border-radius:6px; cursor:pointer; font-size:0.8rem; }
+.note-btn.clicked { background:#16a34a; }
+.game-progress { font-size:0.75rem; opacity:0.8; }
+.thumb { width:100%; height:110px; object-fit:cover; border-radius:6px; margin-bottom:0.4rem; background:#1f2428; border:1px solid #2e3940; }
+.card-thumbnail { width:100%; aspect-ratio:16/9; object-fit:cover; border-top-left-radius:8px; border-top-right-radius:8px; display:block; background:#1f2428; border:1px solid #2e3940; margin-bottom:0.4rem; }
+.relationships-box { margin-top:0.6rem; background:#1f2428; border:1px solid #2e3940; border-radius:6px; padding:0.5rem 0.6rem; display:flex; flex-direction:column; gap:0.35rem; }
+.relationships-title { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; opacity:0.7; }
+.relationship-row { font-size:0.7rem; display:flex; gap:0.4rem; align-items:center; }
+.relationship-row .rel-type { background:#374151; padding:0.1rem 0.4rem; border-radius:4px; font-size:0.6rem; letter-spacing:0.5px; }
+
+/* Playlists */
+.playlist-card__header { display:flex; align-items:center; justify-content:space-between; gap:0.5rem; }
+.playlist-card__title { margin:0; font-size:1rem; }
+.playlist-card__meta { font-size:0.75rem; opacity:0.8; display:flex; gap:0.4rem; flex-wrap:wrap; }
+.playlist-lessons { margin-top:0.35rem; display:flex; flex-direction:column; gap:0.3rem; }
+.playlist-lesson { display:flex; align-items:center; justify-content:space-between; gap:0.4rem; padding:0.35rem 0.45rem; border:1px solid #2e3940; border-radius:6px; background:#1b2126; }
+.playlist-lesson__title { font-size:0.85rem; }
+.playlist-lesson__status { font-size:0.75rem; opacity:0.8; }
+
+/* Kebab menu */
+.kebab-btn { font-size:1rem; line-height:1; padding:0.15rem 0.35rem; }
+.menu { background:#111827; border:1px solid #2e3940; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.35); padding:0.25rem; }
+.menu__item { display:block; width:100%; text-align:left; padding:0.4rem 0.6rem; background:transparent; border:none; color:#e6e9ec; border-radius:6px; cursor:pointer; font-size:0.85rem; }
+.menu__item:hover:not(:disabled), .menu__item:focus-visible { background:#1f2937; outline:none; }
+.menu__item:disabled { opacity:0.5; cursor:not-allowed; }
+
+/* Focus chip accent */
+.chip--focus { background:#1e40af; color:#fff; }
+
+/* --- Unified Lesson Card Styles --- */
+.lesson-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+	gap: 20px;
+	align-items: start;
+}
+
+.lesson-card {
+	background: #0f172a; /* slate-900 */
+	border: 1px solid rgba(255,255,255,0.06);
+	border-radius: 20px;
+	box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+	padding: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	transition: transform 120ms ease;
+}
+
+.lesson-card:hover { transform: translateY(-2px); }
+
+.lesson-card__header { display: flex; justify-content: space-between; align-items: center; }
+.lesson-card__title { font-size: 20px; font-weight: 600; color: #e5e7eb; }
+.lesson-card__type { display: flex; align-items: center; gap: 6px; color: #9ca3af; }
+.lesson-card__type-text { font-size: 0.9rem; }
+.lesson-card__type-icon { font-size: 1rem; }
+
+.lesson-card__thumb { position: relative; border-radius: 16px; overflow: hidden; aspect-ratio: 16 / 9; cursor: pointer; background: linear-gradient(135deg, #1f2937, #111827); }
+.lesson-card__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lesson-card__overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.18); opacity: 0; transition: opacity 120ms ease; }
+.lesson-card__overlay-icon { font-size: 28px; color: #ffffff; text-shadow: 0 2px 6px rgba(0,0,0,0.35); }
+.lesson-card:hover .lesson-card__overlay, .lesson-card__thumb:focus .lesson-card__overlay { opacity: 1; }
+.lesson-card__thumb:focus { outline: 2px solid #2563eb; outline-offset: 2px; }
+
+.lesson-card__meta { display: flex; align-items: center; gap: 6px; color: #9ca3af; font-size: 0.9rem; }
+.lesson-pill { background: #1f2937; color: #e5e7eb; border-radius: 999px; padding: 2px 8px; font-size: 0.75rem; }
+.lesson-meta-dot { opacity: 0.6; }
+.lesson-link { color: #93c5fd; font-size: 0.85rem; text-decoration: none; }
+.lesson-link:hover { text-decoration: underline; }
+
+.lesson-card__footer { display: flex; justify-content: flex-end; }
+.lesson-btn { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; padding: 8px 16px; border-radius: 999px; font-weight: 600; }
+.lesson-btn--primary { background: #2563eb; color: #ffffff; }
+
+/* Type accents for primary button */
+.lesson-card--video .lesson-btn--primary { background: #3b82f6; }
+.lesson-card--game  .lesson-btn--primary { background: #10b981; }
+.lesson-card--quiz  .lesson-btn--primary { background: #8b5cf6; }
+
+/* Keyboard Lesson UI */
+.keyboard-lesson{ margin: 1rem 0; }
+.keyboard-lesson__header h3{ margin: 0 0 0.25rem 0; }
+.keyboard-lesson__prompt{ margin: 0 0 0.5rem 0; font-weight: 500; }
+.keyboard-lesson__controls{ display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; }
+.keyboard-lesson__progress{ width: 100%; height: 8px; background: #eee; border-radius: 4px; margin: 0.5rem 0 1rem 0; overflow: hidden; }
+.keyboard-lesson__progress__bar{ height: 100%; width: 0%; background: #4caf50; }
+
+.piano{ position: relative; display: block; user-select: none; padding: 8px; background: #f7f7f7; border: 1px solid #ddd; border-radius: 6px; white-space: nowrap; overflow-x: visible; overflow-y: hidden; }
+.key{ position: relative; display: inline-block; vertical-align: bottom; cursor: pointer; transition: background-color 120ms ease, box-shadow 120ms ease, transform 80ms ease, border-color 120ms ease; }
+.key.white{ width: 42px; height: 180px; background: #fff; border: 1px solid #ccc; margin: 0 1px; box-sizing: border-box; }
+.key.black{ width: 28px; height: 110px; background: #333; border: 1px solid #111; position: absolute; margin-left: -14px; z-index: 2; border-radius: 0 0 3px 3px; }
+.key.white.active{ background: #dbeafe; border-color: #60a5fa; box-shadow: 0 0 0 2px #93c5fd inset, 0 6px 12px rgba(59,130,246,0.35); transform: translateY(1px); }
+.key.black.active{ background: #4b5563; border-color: #60a5fa; box-shadow: 0 0 0 2px #93c5fd, 0 6px 12px rgba(59,130,246,0.4); transform: translateY(1px); }

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Lesson Player</title>
+	<link rel="stylesheet" href="css/styles.css" />
+	<link rel="stylesheet" href="css/components.css" />
+</head>
+<body id="lessonPage">
+	<header class="site-header">
+		<div class="site-header__left">
+			<h1 id="lessonTitle">Lesson</h1>
+		</div>
+		<div class="site-header__right">
+			<span id="header-username" class="header-username"></span>
+			<nav>
+				<a href="index.html" class="btn">Home</a>
+				<a href="profile.html" class="btn">Profile</a>
+				<a href="lesson_creator.html" class="btn secondary">Lesson Creator</a>
+				<a href="my-lessons.html" class="btn secondary">My Lessons</a>
+				<a href="creator.html" class="btn secondary">Course Creator</a>
+			</nav>
+			<button id="runnerAddToPlaylistBtn" class="btn secondary" type="button">Add to Playlist</button>
+			<button id="header-switch-user" type="button" class="btn subtle">Switch user</button>
+		</div>
+	</header>
+	<main>
+		<div id="runnerHeader" class="runner-header">
+			<div class="runner-progress">
+				<div id="runnerProgressBar" class="runner-progress__bar" style="width:0%;"></div>
+			</div>
+		</div>
+		<div id="lessonMeta" class="lesson-meta"></div>
+		<div id="lessonContainer" class="lesson-container"></div>
+		<div id="completionPanel" class="completion-panel hidden">
+			<h3>Session Summary</h3>
+			<p id="xpAwardText"></p>
+			<p id="masteryImpactText" class="short"></p>
+			<div class="actions">
+				<button id="startNextLessonBtn" class="btn">Start Next Lesson</button>
+				<button id="openNextConceptBtn" class="btn secondary">Open Next Concept</button>
+				<button id="continueBtn" class="btn subtle">Back to Home</button>
+			</div>
+		</div>
+	</main>
+	<!-- Playlist Modal (for lesson page) -->
+	<div id="playlistModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="playlistModalTitle">
+		<div class="modal__dialog">
+			<header class="modal__header">
+				<h3 id="playlistModalTitle">Add to Playlist</h3>
+			</header>
+			<div class="modal__body">
+				<label class="modal__label">Choose playlist
+					<select id="plSelect"></select>
+				</label>
+				<div class="modal__divider">or</div>
+				<button id="plCreateToggle" class="btn secondary" type="button">Create New Playlist</button>
+				<div id="plCreateFields" class="hidden" style="margin-top:0.6rem;">
+					<label class="modal__label">Title
+						<input id="plNewTitle" type="text" placeholder="Intro to ..." />
+					</label>
+					<label class="modal__label">Description
+						<textarea id="plNewDesc" rows="2" placeholder="My route from zero to comfort."></textarea>
+					</label>
+				</div>
+				<p id="plErr" class="error-text"></p>
+			</div>
+			<footer class="modal__footer">
+				<button id="plCancel" class="btn secondary" type="button">Cancel</button>
+				<button id="plAdd" class="btn" type="button">Add</button>
+			</footer>
+		</div>
+	</div>
+	<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+	<script type="module" src="js/player.js"></script>
+</body>
+</html>

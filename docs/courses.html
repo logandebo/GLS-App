@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Courses Catalog</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/components.css" />
+</head>
+<body id="coursesPage">
+  <header class="site-header">
+    <div class="site-header__left">
+      <h1>Courses</h1>
+    </div>
+    <div class="site-header__right">
+      <span id="header-username" class="header-username"></span>
+      <nav>
+        <a href="index.html" class="btn">Home</a>
+        <a href="profile.html" class="btn secondary">Profile</a>
+        <a href="creator.html" class="btn secondary">Course Creator</a>
+        <a href="lesson_creator.html" class="btn secondary">Lesson Creator</a>
+        <a href="my-lessons.html" class="btn secondary">My Lessons</a>
+      </nav>
+      <button id="header-switch-user" type="button" class="btn subtle">Switch user</button>
+    </div>
+  </header>
+  <main class="container" style="padding:1rem;">
+    <section class="card" style="margin-bottom:1rem;">
+      <div class="section-header" style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+        <input id="searchInput" type="search" class="input" placeholder="Search courses" style="flex:1; min-width:240px;" />
+        <select id="domainFilter" class="input" title="Filter by domain" style="min-width:160px;"></select>
+        <select id="tagFilter" class="input" title="Filter by tag" style="min-width:160px;"></select>
+        <select id="sortSelect" class="input" title="Sort" style="min-width:160px;">
+          <option value="popular">Popular</option>
+          <option value="newest">Newest</option>
+          <option value="title_asc">Title (A→Z)</option>
+          <option value="shortest">Shortest</option>
+        </select>
+      </div>
+    </section>
+    <section>
+      <div id="catalogGrid" class="card-grid"></div>
+      <p id="catalogEmpty" class="empty-state hidden">No courses published yet.</p>
+    </section>
+  </main>
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="js/courses.js"></script>
+</body>
+</html>
