@@ -52,7 +52,11 @@ function bindEvents() {
 				const email = emailEl?.value?.trim();
 				const password = passwordEl?.value || '';
 				if (!email || !password) return;
-				await window.supabaseClient.signInWithEmail(email, password);
+				const { data, error } = await window.supabaseClient.signInWithEmail(email, password);
+				if (error) {
+					setStatus(`Sign-in failed: ${error.message}`);
+					return;
+				}
 				await refreshSessionUI();
 				window.location.href = 'index.html';
 			} catch (e) {
@@ -66,7 +70,11 @@ function bindEvents() {
 				const email = emailEl?.value?.trim();
 				const password = passwordEl?.value || '';
 				if (!email || !password) return;
-				await window.supabaseClient.signUpWithEmail(email, password);
+				const { data, error } = await window.supabaseClient.signUpWithEmail(email, password);
+				if (error) {
+					setStatus(`Sign-up failed: ${error.message}`);
+					return;
+				}
 				await refreshSessionUI();
 				setStatus('Sign-up initiated. Check email if confirmation enabled.');
 			} catch (e) {
