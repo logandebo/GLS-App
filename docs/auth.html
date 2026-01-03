@@ -14,15 +14,48 @@
 	<main class="auth-main">
 		<section class="auth-card">
 			<h2>Welcome</h2>
-			<p>Enter a username to start or continue your learning journey.</p>
+			<p>Choose demo mode (local) or sign in with Supabase.</p>
 			<form id="auth-form">
 				<label for="auth-username">Username</label>
 				<input id="auth-username" name="username" type="text" required autocomplete="off" />
-				<button type="submit">Continue</button>
+				<button type="submit">Continue (Demo Mode)</button>
 			</form>
 			<div id="auth-user-list" class="auth-user-list"></div>
 		</section>
+
+		<section class="auth-card">
+			<h2>Supabase Account</h2>
+			<div id="supabase-status" class="auth-status"></div>
+			<div id="supabase-auth">
+				<form id="supabase-form" autocomplete="off">
+					<label for="supabase-email">Email</label>
+					<input id="supabase-email" name="email" type="email" required />
+					<label for="supabase-password">Password</label>
+					<input id="supabase-password" name="password" type="password" required />
+					<div class="auth-actions">
+						<button id="supabase-signin" type="button">Sign In</button>
+						<button id="supabase-signup" type="button">Sign Up</button>
+					</div>
+				</form>
+				<div class="auth-actions" id="supabase-logout-container" style="display:none;">
+					<button id="supabase-logout" type="button">Log Out</button>
+				</div>
+			</div>
+			<p class="auth-hint">Note: Configure Supabase URL and anon key to enable sign in.</p>
+		</section>
 	</main>
+
+	<!-- Supabase JS (UMD) -->
+	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+	<!-- Configure these values before production: set on window -->
+	<script>
+		// TODO: Replace placeholders with your Supabase project credentials.
+		window.SUPABASE_URL = window.SUPABASE_URL || 'https://sohjyinqrxypeqiatanf.supabase.co';
+		window.SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNvaGp5aW5xcnh5cGVxaWF0YW5mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczODE2NTAsImV4cCI6MjA4Mjk1NzY1MH0.9A-yt1v6Wi3HUUFq3hcH8XHFzG4146KRYNjiXdnVQ_w';
+	</script>
+	<!-- Shared Supabase client + auth wiring -->
+	<script type="module" src="js/supabaseClient.js"></script>
 	<script type="module" src="js/auth.js"></script>
+	<script type="module" src="js/auth_supabase.js"></script>
 </body>
 </html>
