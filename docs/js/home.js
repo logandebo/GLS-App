@@ -1,28 +1,43 @@
-import { getActiveUsername, getActiveProfile, migrateLegacyProfileIfNeeded, ensureActiveUserOrRedirect } from './storage.js';
+// Demo mode disabled on homepage; header and personalization rely on Supabase session only.
+// Retain storage imports commented for potential future use.
+import { /* getActiveUsername, getActiveProfile, migrateLegacyProfileIfNeeded, ensureActiveUserOrRedirect, setActiveUsername */ } from './storage.js';
 import { loadPublicCatalog, loadTreeMetrics } from './catalogStore.js';
 import { loadAllLessons } from './contentLoader.js';
 import { loadUserTreeProgress } from './userTreeProgress.js';
 import { loadUserPreferences } from './preferences.js';
 import { renderToast } from './ui.js';
 
-(function initHeader(){
-  const usernameEl = document.getElementById('header-username');
-  const switchBtn = document.getElementById('header-switch-user');
-  const username = getActiveUsername();
-  if (usernameEl && username) usernameEl.textContent = `Logged in as: ${username}`;
-  if (switchBtn) switchBtn.addEventListener('click', () => { window.location.href = 'auth.html'; });
-})();
+// Header controls are fully managed by headerControls.js
 
 let _allLessons = [];
 let _catalog = [];
 let _metrics = {};
+let _liveUserId = null;
+
+async function resolveLiveUserId(){
+  try {
+    const sb = window.supabaseClient;
+    if (sb && sb.isConfigured && sb.isConfigured()){
+      const { data } = await sb.getSession();
+      const user = data && data.session ? data.session.user : null;
+      if (user){
+        const meta = (user.user_metadata || {});
+        const fallback = (user.email||'').split('@')[0] || '';
+        const liveName = [meta.full_name, meta.preferred_username, meta.username, meta.name]
+          .find(v => typeof v === 'string' && v.trim()) || fallback;
+        return liveName || null;
+      }
+    }
+  } catch {}
+  return null;
+}
 
 (async function init(){
-  migrateLegacyProfileIfNeeded();
   const loading = document.getElementById('loading-state');
   try {
-    const ok = ensureActiveUserOrRedirect();
-    if (!ok) return; // redirected
+    // Determine live user id if signed in (no demo fallback)
+    _liveUserId = await resolveLiveUserId();
+    // Homepage is accessible when logged out; do not enforce demo or redirect.
     _catalog = loadPublicCatalog();
     _metrics = loadTreeMetrics();
     initHero();
@@ -30,10 +45,7 @@ let _metrics = {};
     renderFeaturedCourses();
     renderPersonalized();
     initSearchExplore();
-    // Refresh header username in case it changed
-    const usernameEl = document.getElementById('header-username');
-    const username = getActiveUsername();
-    if (usernameEl && username) usernameEl.textContent = `Logged in as: ${username}`;
+    // Header is driven by sessionBadge.js; no manual text here
     // Load lessons in background; enhance cards when available
     try {
       _allLessons = await loadAllLessons();
@@ -180,7 +192,7 @@ function getCourseThumbnailUrl(tree){
 }
 
 function getCourseProgressPercent(treeId, nodes){
-  const userId = getActiveUsername();
+  const userId = _liveUserId;
   if (!userId) return { percent: 0, touched: 0, total: Array.isArray(nodes)?nodes.length:0 };
   const data = loadUserTreeProgress(userId);
   const entry = data[treeId] || { touchedNodeIds: [] };
@@ -193,42 +205,27 @@ function getCourseProgressPercent(treeId, nodes){
 // New: completion-based percent excluding games for homepage course cards
 function getCourseCompletionPercent(tree){
   try {
-    // Collect all lesson IDs from tree nodes (unique)
-    const ids = new Set();
-    (tree.nodes||[]).forEach(n => {
-      (n.subtreeLessonIds||[]).forEach(id => ids.add(id));
-      Object.keys(n.subtreeLessonSteps||{}).forEach(id => ids.add(id));
-    });
-    if (!ids.size || !_allLessons || !_allLessons.length) return { percent: 0, completed: 0, total: 0 };
-    const byId = new Map(_allLessons.map(l => [l.id, l]));
-    const lessons = Array.from(ids).map(id => byId.get(id)).filter(Boolean);
-    // Exclude games and external links from completion percent
-    const nonGame = lessons.filter(l => {
-      const t = String(l?.type||'').toLowerCase();
-      return t !== 'unity_game' && t !== 'game' && t !== 'external_link' && t !== 'external' && t !== 'link';
-    });
-    const total = nonGame.length;
+    const nodes = Array.isArray(tree.nodes) ? tree.nodes : [];
+    const total = nodes.length;
     if (!total) return { percent: 0, completed: 0, total: 0 };
-    // Completed by active profile (by lesson id)
-    const profile = getActiveProfile();
-    const completedIds = new Set();
-    const cp = profile && profile.conceptProgress ? profile.conceptProgress : {};
-    Object.values(cp || {}).forEach(entry => (entry?.completedLessonIds||[]).forEach(id => completedIds.add(id)));
-    const completed = nonGame.filter(l => completedIds.has(l.id)).length;
-    const percent = Math.round((completed / total) * 100);
-    return { percent, completed, total };
+    const userId = _liveUserId;
+    if (!userId) return { percent: 0, completed: 0, total };
+    const data = loadUserTreeProgress(userId);
+    const entry = data[tree.id] || { touchedNodeIds: [] };
+    const touched = new Set(entry.touchedNodeIds || []);
+    const percent = total ? Math.round((touched.size / total) * 100) : 0;
+    return { percent, completed: touched.size, total };
   } catch { return { percent: 0, completed: 0, total: 0 }; }
 }
 
 function renderPersonalized(){
   const section = document.getElementById('personalized-section');
-  const username = getActiveUsername();
-  const profile = getActiveProfile();
+  const userId = _liveUserId;
   if (!section) return;
-  if (!username || !profile){ section.classList.add('hidden'); return; }
+  if (!userId){ section.classList.add('hidden'); return; }
   section.classList.remove('hidden');
-  renderContinueCourses(username);
-  renderRecommendedCourses(username);
+  renderContinueCourses(userId);
+  renderRecommendedCourses(userId);
 }
 
 function renderContinueCourses(userId){

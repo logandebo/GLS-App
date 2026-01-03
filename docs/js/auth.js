@@ -12,9 +12,9 @@ const userListContainer = document.getElementById('auth-user-list');
 
 init();
 
-function init() {
+async function init() {
 	if (usernameInput) usernameInput.focus();
-	renderExistingUsers();
+	await renderExistingUsers();
 	setupFormHandler();
 }
 
@@ -36,10 +36,26 @@ function setupFormHandler() {
 	});
 }
 
-function renderExistingUsers() {
+async function renderExistingUsers() {
 	const users = loadUsers();
-	const usernames = Object.keys(users);
+	let usernames = Object.keys(users);
 	if (!userListContainer) return;
+
+	// If a live session exists, exclude that username from demo list
+	try {
+		const sb = window.supabaseClient;
+		if (sb && sb.isConfigured && sb.isConfigured()) {
+			const { data } = await sb.getSession();
+			const user = data && data.session ? data.session.user : null;
+			if (user) {
+				const meta = user.user_metadata || {};
+				const liveName = [meta.full_name, meta.preferred_username, meta.username, meta.name]
+					.find(v => typeof v === 'string' && v.trim()) || (user.email || '').split('@')[0] || null;
+				if (liveName) usernames = usernames.filter(u => u !== liveName);
+			}
+		}
+	} catch {}
+
 	if (!usernames.length) {
 		userListContainer.innerHTML = '';
 		return;

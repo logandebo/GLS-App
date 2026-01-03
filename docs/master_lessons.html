@@ -25,8 +25,23 @@
     <div class="site-header__right">
       <span id="header-username" class="header-username"></span>
       <a href="index.html" class="btn">Home</a>
-      <a href="my-lessons.html" class="btn secondary">My Lessons</a>
-      <button id="header-switch-user" type="button" class="btn subtle">Switch user</button>
+      <div class="dropdown">
+        <button class="btn secondary dropdown-toggle" type="button">Creator Tools</button>
+        <div class="menu dropdown-menu" role="menu" aria-label="Creator Tools">
+          <a href="creator.html" class="menu__item" role="menuitem">Course Creator</a>
+          <a href="lesson_creator.html" class="menu__item" role="menuitem">Lesson Creator</a>
+          <a href="my-lessons.html" class="menu__item" role="menuitem">My Lessons</a>
+        </div>
+      </div>
+      <button id="header-login" type="button" class="btn subtle">Login</button>
+      <button id="header-signup" type="button" class="btn subtle">Sign Up</button>
+      <div class="dropdown">
+        <a id="header-profile-avatar" href="profile.html" class="profile-avatar hidden" aria-label="Profile"></a>
+        <div class="menu dropdown-menu" role="menu" aria-label="Profile menu">
+          <a href="profile.html" class="menu__item" role="menuitem">Profile</a>
+          <button id="header-signout" class="menu__item" type="button">Logout</button>
+        </div>
+      </div>
     </div>
   </header>
   <main class="mlc-layout">
@@ -42,5 +57,13 @@
   </main>
   <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
   <script type="module" src="js/masterLessons.js"></script>
+  <!-- Supabase JS (UMD) for live mode -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script>
+    window.SUPABASE_URL = window.SUPABASE_URL || 'https://sohjyinqrxypeqiatanf.supabase.co';
+    window.SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNvaGp5aW5xcnh5cGVxaWF0YW5mIiwicm9zZSI6ImFub24iLCJpYXQiOjE3NjczODE2NTAsImV4cCI6MjA4Mjk1NzY1MH0.9A-yt1v6Wi3HUUFq3hcH8XHFzG4146KRYNjiXdnVQ_w';
+  </script>
+  <script type="module" src="js/supabaseClient.js?v=20260103"></script>
+  <script type="module" src="js/headerControls.js?v=20260103"></script>
 </body>
 </html>

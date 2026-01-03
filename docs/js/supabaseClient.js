@@ -27,9 +27,9 @@ async function signInWithEmail(email, password) {
 	return client.auth.signInWithPassword({ email, password });
 }
 
-async function signUpWithEmail(email, password) {
+async function signUpWithEmail(email, password, data) {
 	if (!client) throw new Error('Supabase not configured');
-	return client.auth.signUp({ email, password });
+	return client.auth.signUp({ email, password, options: { data: data || {} } });
 }
 
 async function signOut() {

@@ -1,39 +1,24 @@
-// Session Badge: shows Supabase email or demo username in the header
-import { getActiveUsername } from './storage.js';
+// Session Badge: disabled per request — hide username/status in header
 
-async function updateHeader() {
+function hideSessionBadge() {
   const el = document.getElementById('header-username') || document.getElementById('lc-header-username');
   if (!el) return;
-
-  let text = 'Not signed in';
   try {
-    const sb = window.supabaseClient;
-    if (sb && sb.isConfigured()) {
-      const { data, error } = await sb.getSession();
-      if (!error) {
-        const session = data?.session || null;
-        if (session && session.user && session.user.email) {
-          text = `Signed in: ${session.user.email}`;
-        }
-      }
-    }
+    el.textContent = '';
+    el.style.display = 'none';
+    el.setAttribute('aria-hidden', 'true');
   } catch {}
-
-  if (text === 'Not signed in') {
-    const username = getActiveUsername();
-    if (username) text = `Demo user: ${username}`;
-  }
-  el.textContent = text;
 }
 
 function subscribeAuthChanges() {
   const sb = window.supabaseClient;
-  if (!sb || !sb.isConfigured) return;
   try {
-    sb.onAuthStateChange(() => updateHeader());
+    if (sb && typeof sb.onAuthStateChange === 'function') {
+      sb.onAuthStateChange(() => hideSessionBadge());
+    }
   } catch {}
 }
 
 // init
-updateHeader();
+hideSessionBadge();
 subscribeAuthChanges();

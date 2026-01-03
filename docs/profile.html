@@ -17,11 +17,24 @@
 			<nav>
 				<a href="courses.html" class="btn">Courses</a>
 				<a href="index.html" class="btn">Home</a>
-				<a href="lesson_creator.html" class="btn secondary">Lesson Creator</a>
-				<a href="my-lessons.html" class="btn secondary">My Lessons</a>
-				<a href="creator.html" class="btn secondary">Course Creator</a>
+				<div class="dropdown">
+					<button class="btn secondary dropdown-toggle" type="button">Creator Tools</button>
+					<div class="menu dropdown-menu" role="menu" aria-label="Creator Tools">
+						<a href="creator.html" class="menu__item" role="menuitem">Course Creator</a>
+						<a href="lesson_creator.html" class="menu__item" role="menuitem">Lesson Creator</a>
+						<a href="my-lessons.html" class="menu__item" role="menuitem">My Lessons</a>
+					</div>
+				</div>
 			</nav>
-			<button id="header-switch-user" type="button" class="btn subtle">Switch user</button>
+			<button id="header-login" type="button" class="btn subtle">Login</button>
+			<button id="header-signup" type="button" class="btn subtle">Sign Up</button>
+						<div class="dropdown">
+							<a id="header-profile-avatar" href="profile.html" class="profile-avatar hidden" aria-label="Profile"></a>
+							<div class="menu dropdown-menu" role="menu" aria-label="Profile menu">
+								<a href="profile.html" class="menu__item" role="menuitem">Profile</a>
+								<button id="header-signout" class="menu__item" type="button">Logout</button>
+							</div>
+						</div>
 		</div>
 	</header>
 	<main>
@@ -43,20 +56,18 @@
 			<h2>Concept Mastery</h2>
 			<div id="masteryGrid" class="grid"></div>
 		</section>
-		<section id="myPlaylistsSection" class="card" style="margin-top:1rem;">
-			<div class="section-header" style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
-				<h2 style="margin:0;">My Playlists</h2>
-				<div style="display:flex; gap:0.5rem;">
-					<button id="profileImportPlaylistBtn" class="btn secondary" type="button">Import</button>
-					<input id="profileImportPlaylistInput" type="file" accept="application/json,.json" style="display:none;" />
-				</div>
-			</div>
-			<div id="myPlaylistsList" class="list"></div>
-			<p id="myPlaylistsEmpty" class="empty-state hidden">You don't have any playlists yet.</p>
-		</section>
+		<!-- My Playlists section removed per request -->
 	</main>
 	<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
-	<script type="module" src="js/sessionBadge.js"></script>
-	<script type="module" src="js/profile.js"></script>
+	<!-- Supabase JS (UMD) for live mode -->
+	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+	<script>
+		window.SUPABASE_URL = window.SUPABASE_URL || 'https://sohjyinqrxypeqiatanf.supabase.co';
+		window.SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNvaGp5aW5xcnh5cGVxaWF0YW5mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczODE2NTAsImV4cCI6MjA4Mjk1NzY1MH0.9A-yt1v6Wi3HUUFq3hcH8XHFzG4146KRYNjiXdnVQ_w';
+	</script>
+	<script type="module" src="js/supabaseClient.js?v=20260103"></script>
+	<script type="module" src="js/sessionBadge.js?v=20260103"></script>
+	<script type="module" src="js/profile.js?v=20260103"></script>
+	<script type="module" src="js/headerControls.js?v=20260103"></script>
 </body>
 </html>

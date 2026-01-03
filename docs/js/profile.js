@@ -5,6 +5,7 @@ import { getOrCreateDefaultProfile, computeTotalXpFromCompletedLessons, recomput
 import { renderToast } from './ui.js';
 import { renderProfilePage } from './user.js';
 import { migrateLegacyProfileIfNeeded, ensureActiveUserOrRedirect, getActiveProfile, createDefaultProfile, saveActiveProfile, getActiveUsername } from './storage.js';
+import { loadUserProgress as loadUserProgressSupabase, saveUserProgress as saveUserProgressSupabase } from './supabaseStore.js';
 import { loadUserPreferences, saveUserPreferences, setFocusTags } from './preferences.js';
 import { loadPlaylists, updatePlaylistMeta, deletePlaylist, duplicatePlaylist, getProgress as getPlaylistProgress, getTotalMinutes as getPlaylistMinutes, importPlaylistData, exportPlaylistData } from './playlists.js';
 
@@ -12,8 +13,30 @@ import { loadPlaylists, updatePlaylistMeta, deletePlaylist, duplicatePlaylist, g
 (function initHeader() {
 	const usernameEl = document.getElementById('header-username');
 	const switchBtn = document.getElementById('header-switch-user');
-	const username = getActiveUsername();
-	if (usernameEl && username) usernameEl.textContent = `Logged in as: ${username}`;
+	async function setHeader() {
+		let label = null;
+		try {
+			if (window.supabaseClient && window.supabaseClient.isConfigured()) {
+				const { data } = await window.supabaseClient.getSession();
+				const user = data && data.session ? data.session.user : null;
+				if (user) {
+					const meta = (user.user_metadata || {});
+					const liveName = [meta.full_name, meta.preferred_username, meta.username, meta.name]
+						.find(v => typeof v === 'string' && v.trim()) || (user.email || '').split('@')[0] || 'user';
+					label = `Logged in as: ${liveName} (Live)`;
+				}
+			}
+		} catch {}
+		if (!label) {
+			const username = getActiveUsername();
+			if (username) label = `Logged in as: ${username} (Demo)`;
+		}
+		if (usernameEl && label) usernameEl.textContent = label;
+	}
+	setHeader();
+	if (window.supabaseClient) {
+		try { window.supabaseClient.onAuthStateChange(() => setHeader()); } catch {}
+	}
 	if (switchBtn) switchBtn.addEventListener('click', () => { window.location.href = 'auth.html'; });
 })();
 
@@ -31,16 +54,48 @@ import { loadPlaylists, updatePlaylistMeta, deletePlaylist, duplicatePlaylist, g
 	if (summary) summary.textContent = 'Loading profile…';
 	if (masteryGrid) masteryGrid.textContent = 'Loading…';
 	try {
+		// If Supabase session exists and cloud progress is available, prefer it
+		if (window.supabaseClient && window.supabaseClient.isConfigured()) {
+			const { data: sess } = await window.supabaseClient.getSession();
+			if (sess && sess.session && sess.session.user) {
+				const { progress } = await loadUserProgressSupabase();
+				if (progress && typeof progress === 'object') {
+					// Replace local profile with cloud copy
+					saveActiveProfile(progress);
+				}
+			}
+		}
 		await loadGraphStore();
 		await loadLessons();
 		buildLessonMap(getAllLessons());
 		const profile = getOrCreateDefaultProfile();
+		// If live user, align local profile username to live username
+		if (window.supabaseClient && window.supabaseClient.isConfigured()) {
+			const { data: sess } = await window.supabaseClient.getSession();
+			const user = sess && sess.session ? sess.session.user : null;
+			if (user) {
+				const meta = (user.user_metadata || {});
+				const liveName = [meta.full_name, meta.preferred_username, meta.username, meta.name]
+					.find(v => typeof v === 'string' && v.trim()) || (user.email || '').split('@')[0] || profile.username;
+				if (typeof liveName === 'string' && liveName && liveName !== profile.username) {
+					profile.username = liveName;
+					saveActiveProfile(profile);
+				}
+			}
+		}
 		computeTotalXpFromCompletedLessons(profile, getLessonMap());
 		recomputeAllConceptProgress(profile, gsGetAllNodes(), getLessonMap());
 		renderProfilePage();
 		setupFocusUI();
 		renderMyPlaylists();
 		setupImportPlaylists();
+		// After recompute, save to Supabase if signed in
+		if (window.supabaseClient && window.supabaseClient.isConfigured()) {
+			const { data: sess } = await window.supabaseClient.getSession();
+			if (sess && sess.session && sess.session.user) {
+				await saveUserProgressSupabase(getOrCreateDefaultProfile());
+			}
+		}
 	} catch (e) {
 		console.error('Failed to init profile page', e);
 		if (summary) summary.textContent = 'Error loading profile data.';

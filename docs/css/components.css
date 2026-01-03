@@ -5,6 +5,8 @@
 .fixed-card-grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fill, minmax(320px, 320px)); justify-content:flex-start; }
 .section-header { display:flex; align-items:center; justify-content:space-between; gap:0.75rem; margin-bottom:0.5rem; }
 #lesson-preview-panel { margin-top:2rem; background:#1f2428; border:1px solid #2e3940; border-radius:8px; padding:0.75rem 0.9rem; }
+.profile-avatar { width: 32px; height: 32px; border-radius: 50%; background: #2f6bed; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 600; margin-left: 0.25rem; text-decoration: none; }
+.profile-avatar.hidden { display: none; }
 #lesson-preview-panel h2 { margin-top:0; font-size:1rem; }
 .view-toggle-button { background:#374151; border:none; color:#e6e9ec; padding:0.4rem 0.75rem; border-radius:6px; cursor:pointer; font-size:0.75rem; }
 .view-toggle-button.active { background:#2563eb; }
@@ -54,6 +56,10 @@
 .menu__item { display:block; width:100%; text-align:left; padding:0.4rem 0.6rem; background:transparent; border:none; color:#e6e9ec; border-radius:6px; cursor:pointer; font-size:0.85rem; }
 .menu__item:hover:not(:disabled), .menu__item:focus-visible { background:#1f2937; outline:none; }
 .menu__item:disabled { opacity:0.5; cursor:not-allowed; }
+/* Dropdown for header tools */
+.dropdown { position: relative; display: inline-block; }
+.dropdown-menu { position: absolute; right: 0; top: 100%; min-width: 200px; display: none; z-index: 20; }
+.dropdown.open .dropdown-menu { display: block; }
 
 /* Focus chip accent */
 .chip--focus { background:#1e40af; color:#fff; }
@@ -122,3 +128,6 @@
 .key.black{ width: 28px; height: 110px; background: #333; border: 1px solid #111; position: absolute; margin-left: -14px; z-index: 2; border-radius: 0 0 3px 3px; }
 .key.white.active{ background: #dbeafe; border-color: #60a5fa; box-shadow: 0 0 0 2px #93c5fd inset, 0 6px 12px rgba(59,130,246,0.35); transform: translateY(1px); }
 .key.black.active{ background: #4b5563; border-color: #60a5fa; box-shadow: 0 0 0 2px #93c5fd, 0 6px 12px rgba(59,130,246,0.4); transform: translateY(1px); }
+
+/* Hide session badge in header */
+#header-username, #lc-header-username { display: none !important; }

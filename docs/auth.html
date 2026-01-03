@@ -6,6 +6,19 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<link rel="stylesheet" href="css/styles.css" />
 	<link rel="stylesheet" href="css/components.css" />
+		<style>
+			/* Tidy layout for auth cards and live form rows */
+			.auth-main { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+			.auth-card { flex: 1 1 380px; }
+			.live-form .form-row { display: flex; align-items: center; gap: 0.75rem; margin: 0.5rem 0; }
+			.live-form .form-row label { min-width: 110px; white-space: nowrap; }
+			.live-form .form-row input { flex: 1; }
+			.auth-actions { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
+			/* Live tabs */
+			.live-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+			.live-tab { appearance: none; border: 1px solid var(--border-color, #3a3f45); background: var(--btn-bg, #1f2430); color: var(--text, #e6e6e6); padding: 0.4rem 0.7rem; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+			.live-tab.active { background: var(--btn-primary, #2f6bed); border-color: var(--btn-primary, #2f6bed); }
+		</style>
 </head>
 <body>
 	<header class="site-header">
@@ -13,32 +26,54 @@
 	</header>
 	<main class="auth-main">
 		<section class="auth-card">
-			<h2>Welcome</h2>
-			<p>Choose demo mode (local) or sign in with Supabase.</p>
+			<h2>Demo Version</h2>
+			<p>Explore without an email. Local-only demo profile.</p>
 			<form id="auth-form">
 				<label for="auth-username">Username</label>
 				<input id="auth-username" name="username" type="text" required autocomplete="off" />
-				<button type="submit">Continue (Demo Mode)</button>
+				<button type="submit">See Demo</button>
 			</form>
 			<div id="auth-user-list" class="auth-user-list"></div>
 		</section>
 
 		<section class="auth-card">
-			<h2>Supabase Account</h2>
+			<div class="live-tabs" id="live-tabs">
+				<button type="button" id="live-tab-signin" class="live-tab active" aria-selected="true">Sign In</button>
+				<button type="button" id="live-tab-signup" class="live-tab" aria-selected="false">Sign Up</button>
+			</div>
+			<h2>Live Version</h2>
+			<p>Sign in or sign up with email to use cloud sync.</p>
 			<div id="supabase-status" class="auth-status"></div>
 			<div id="supabase-auth">
-				<form id="supabase-form" autocomplete="off">
-					<label for="supabase-email">Email</label>
-					<input id="supabase-email" name="email" type="email" required />
-					<label for="supabase-password">Password</label>
-					<input id="supabase-password" name="password" type="password" required />
+				<form id="supabase-form" class="live-form" autocomplete="off">
+					<div class="form-row" id="supabase-username-row">
+						<label for="supabase-username">Username</label>
+						<input id="supabase-username" name="username" type="text" placeholder="e.g., player1" required minlength="3" />
+					</div>
+					<div class="form-row" id="supabase-email-row">
+						<label for="supabase-email">Email</label>
+						<input id="supabase-email" name="email" type="email" required placeholder="you@example.com" />
+					</div>
+					<div class="form-row" id="supabase-email-confirm-row" style="display:none;">
+						<label for="supabase-email-confirm">Confirm</label>
+						<input id="supabase-email-confirm" name="emailConfirm" type="email" placeholder="repeat email" />
+					</div>
+					<div class="form-row">
+						<label for="supabase-password">Password</label>
+						<input id="supabase-password" name="password" type="password" required placeholder="••••••••" />
+					</div>
+					<div class="form-row" id="supabase-password-confirm-row" style="display:none;">
+						<label for="supabase-password-confirm">Confirm</label>
+						<input id="supabase-password-confirm" name="passwordConfirm" type="password" placeholder="repeat password" />
+					</div>
 					<div class="auth-actions">
 						<button id="supabase-signin" type="button">Sign In</button>
-						<button id="supabase-signup" type="button">Sign Up</button>
+						<button id="supabase-signup" type="button" style="display:none;">Sign Up</button>
 					</div>
 				</form>
 				<div class="auth-actions" id="supabase-logout-container" style="display:none;">
 					<button id="supabase-logout" type="button">Log Out</button>
+					<button id="supabase-enter" type="button">Enter Live Site</button>
 				</div>
 			</div>
 			<p class="auth-hint">Note: Configure Supabase URL and anon key to enable sign in.</p>
