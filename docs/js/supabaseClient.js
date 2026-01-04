@@ -17,6 +17,19 @@ if (hasConfig && window.supabase && typeof window.supabase.createClient === 'fun
 				}
 			}
 		);
+		// One-time migration: if legacy 'sb-*auth-token' exists but 'gls-auth' is missing, copy it
+		try {
+			const keys = Object.keys(localStorage || {});
+			const legacyKey = keys.find(k => k.startsWith('sb-') && k.includes('auth-token')) || null;
+			const currentKey = 'gls-auth';
+			if (legacyKey && !localStorage.getItem(currentKey)) {
+				const val = localStorage.getItem(legacyKey);
+				if (val) {
+					localStorage.setItem(currentKey, val);
+					console.log('[DEBUG] Migrated legacy Supabase session from', legacyKey, 'to', currentKey);
+				}
+			}
+		} catch {}
 	} catch (e) {
 		console.warn('[Supabase] createClient failed', e);
 	}

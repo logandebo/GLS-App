@@ -115,7 +115,13 @@ function bindEvents() {
 		});
 	}
 	if (enterBtn) {
-		enterBtn.addEventListener('click', () => {
+		enterBtn.addEventListener('click', async () => {
+			try {
+				// Ensure the session was persisted before navigating
+				if (window.supabaseClient && window.supabaseClient.isConfigured()) {
+					await window.supabaseClient.waitForSessionReady(2000, 150);
+				}
+			} catch {}
 			window.location.href = 'index.html';
 		});
 	}
