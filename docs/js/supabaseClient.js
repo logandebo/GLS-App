@@ -56,11 +56,13 @@ async function waitForSessionReady(maxMs = 2000, intervalMs = 150) {
 	try {
 		if (!client) return false;
 		const start = Date.now();
+		try { console.log(`[DEBUG] waitForSessionReady start maxMs=${maxMs} intervalMs=${intervalMs}`); } catch {}
 		while (Date.now() - start < maxMs) {
 			const { data } = await client.auth.getSession();
 			if (data && data.session) return true;
 			await new Promise((r) => setTimeout(r, intervalMs));
 		}
+		try { console.log('[DEBUG] waitForSessionReady timeout without session'); } catch {}
 		return false;
 	} catch {
 		return false;

@@ -116,6 +116,7 @@ function bindEvents() {
 	}
 	if (enterBtn) {
 		enterBtn.addEventListener('click', async () => {
+			try { console.log('[DEBUG] Enter Live Site clicked: waiting for session then navigating'); } catch {}
 			try {
 				// Ensure the session was persisted before navigating
 				if (window.supabaseClient && window.supabaseClient.isConfigured()) {
