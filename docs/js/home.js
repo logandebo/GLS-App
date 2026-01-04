@@ -1,7 +1,7 @@
 // Demo mode disabled on homepage; header and personalization rely on Supabase session only.
 // Retain storage imports commented for potential future use.
 import { /* getActiveUsername, getActiveProfile, migrateLegacyProfileIfNeeded, ensureActiveUserOrRedirect, setActiveUsername */ } from './storage.js';
-import { loadPublicCatalog, loadTreeMetrics } from './catalogStore.js';
+import { loadPublicCatalog, loadTreeMetrics, savePublicCatalog, saveTreeMetrics } from './catalogStore.js';
 import { loadAllLessons } from './contentLoader.js';
 import { loadUserTreeProgress } from './userTreeProgress.js';
 import { loadUserPreferences } from './preferences.js';
@@ -39,6 +39,34 @@ async function resolveLiveUserId(){
     _liveUserId = await resolveLiveUserId();
     // Homepage is accessible when logged out; do not enforce demo or redirect.
     _catalog = loadPublicCatalog();
+    // If no published catalog exists on this origin, seed with a small default
+    if (!_catalog.length) {
+      try {
+        const sampleTree = {
+          id: 'demo.music_scales',
+          title: 'Music Scales Basics',
+          description: 'A quick sampler course with two scale concepts.',
+          creatorId: 'demo',
+          primaryDomain: 'music',
+          tags: ['beginner','music','scales'],
+          ui: { layoutMode: 'top-down' },
+          nodes: [
+            { conceptId: 'music.c_major_scale', nextIds: ['music.g_major_scale'], ui: { x: 0, y: 0 }, unlockConditions: { requiredConceptIds: [], minBadge: 'none' } },
+            { conceptId: 'music.g_major_scale', nextIds: [], ui: { x: 1, y: 0 }, unlockConditions: { requiredConceptIds: [], minBadge: 'none' } }
+          ],
+          version: 1,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        savePublicCatalog([sampleTree]);
+        const metrics = loadTreeMetrics();
+        metrics[sampleTree.id] = { views: 0, starts: 0, completions: 0 };
+        saveTreeMetrics(metrics);
+        _catalog = loadPublicCatalog();
+      } catch (e) {
+        console.warn('Seeding default catalog failed', e);
+      }
+    }
     _metrics = loadTreeMetrics();
     initHero();
     // Render immediately based on catalog; do not block on lessons
