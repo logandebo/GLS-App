@@ -166,5 +166,7 @@ setMode(initial);
 	}
 }
 
-refreshSessionUI();
-bindEvents();
+export function initAuthPage(){
+	refreshSessionUI();
+	bindEvents();
+}

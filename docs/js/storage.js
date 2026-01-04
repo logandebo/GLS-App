@@ -97,10 +97,7 @@ export function migrateLegacyProfileIfNeeded() {
 
 // Auth guard: ensure an active user or redirect to auth.html
 export function ensureActiveUserOrRedirect() {
-	const username = getActiveUsername();
-	if (!username) {
-		window.location.href = 'auth.html';
-		return null;
-	}
-	return username;
+	// Guest mode permitted in new flow; do not auto-redirect.
+	// Callers should use authStore.requireAuth() in page entrypoints.
+	return getActiveUsername();
 }

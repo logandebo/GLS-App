@@ -1,21 +1,16 @@
-import { ensureActiveUserOrRedirect, getActiveUsername, getActiveProfile } from './storage.js';
+import { getActiveProfile } from './storage.js?v=20260103';
+import { subscribe, getState } from './auth/authStore.js?v=20260103';
 import { renderToast } from './ui.js';
 import { loadPublicCatalog, loadTreeMetrics } from './catalogStore.js';
 import { loadGraphStore, getAllNodes as gsGetAllNodes } from './graphStore.js';
 import { loadAllLessons } from './contentLoader.js';
 import { loadUserTreeProgress } from './userTreeProgress.js';
 
-(function initHeader(){
-  const usernameEl = document.getElementById('header-username');
-  const switchBtn = document.getElementById('header-switch-user');
-  const username = getActiveUsername();
-  if (usernameEl && username) usernameEl.textContent = `Logged in as: ${username}`;
-  if (switchBtn) switchBtn.addEventListener('click', () => { window.location.href = 'auth.html'; });
-})();
-
-(async function init(){
-  const ok = ensureActiveUserOrRedirect();
-  if (!ok) return;
+export async function initCourses(){
+  // Courses page is browsable for guests; do not redirect.
+  // If authed, header shows avatar; if guest, header shows Login/Sign Up.
+  // Subscribe for potential future personalization; not required for catalog rendering.
+  subscribe(() => {});
   // Load master graph for duration estimates
   await loadGraphStore();
   _masterIndex = new Map(gsGetAllNodes().map(n => [n.id, n]));
@@ -30,7 +25,7 @@ import { loadUserTreeProgress } from './userTreeProgress.js';
   window.addEventListener('storage', (e) => {
     if (e.key === 'gep_publicCreatorTrees' || e.key === 'gep_treeMetrics') renderCatalog();
   });
-})();
+}
 
 function initFilters(){
   const domainSel = document.getElementById('domainFilter');
@@ -153,6 +148,9 @@ function estimateTotalMinutesForTree(tree){
 
 function getCourseCompletionPercent(tree){
   try {
+    // Ignore demo local profile progress when user is Supabase-authed
+    const s = getState();
+    if (s.status === 'authed') return { percent: 0, completed: 0, total: 0 };
     const ids = new Set();
     (tree.nodes||[]).forEach(n => {
       (n.subtreeLessonIds||[]).forEach(id => ids.add(id));

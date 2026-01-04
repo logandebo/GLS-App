@@ -1,6 +1,8 @@
 // Demo mode disabled on homepage; header and personalization rely on Supabase session only.
 // Retain storage imports commented for potential future use.
 import { /* getActiveUsername, getActiveProfile, migrateLegacyProfileIfNeeded, ensureActiveUserOrRedirect, setActiveUsername */ } from './storage.js';
+import { APP_VERSION, IS_DEV } from './config.js';
+import { subscribe, getState } from './auth/authStore.js?v=20260103';
 import { loadPublicCatalog, loadTreeMetrics, savePublicCatalog, saveTreeMetrics } from './catalogStore.js';
 import { loadAllLessons } from './contentLoader.js';
 import { loadUserTreeProgress } from './userTreeProgress.js';
@@ -32,22 +34,19 @@ async function resolveLiveUserId(){
   return null;
 }
 
-(async function init(){
+export async function initHome(){
   const loading = document.getElementById('loading-state');
   try {
-    // Wait briefly for Supabase session hydration after navigation
-    try {
-      if (window.supabaseClient && window.supabaseClient.isConfigured()) {
-        const ok = await window.supabaseClient.waitForSessionReady(2500, 150);
-        try { console.log(`[DEBUG] home.init: sessionReady=${ok}`); } catch {}
-      }
-    } catch {}
-    // Determine live user id if signed in (no demo fallback)
-    _liveUserId = await resolveLiveUserId();
+    // Determine live user id from authStore
+    const s = getState();
+    _liveUserId = s.user ? (s.user.user_metadata?.username || (s.user.email||'').split('@')[0]) : null;
+    // Keep up-to-date during this page's lifecycle
+    subscribe((ns) => { _liveUserId = ns.user ? (ns.user.user_metadata?.username || (ns.user.email||'').split('@')[0]) : null; renderPersonalized(); });
     // Homepage is accessible when logged out; do not enforce demo or redirect.
     _catalog = loadPublicCatalog();
-    // If no published catalog exists on this origin, seed with a small default
-    if (!_catalog.length) {
+    // If no published catalog exists, only seed in dev or with explicit demo flag
+    const demoEnabled = IS_DEV || new URLSearchParams(location.search).get('demo') === '1' || localStorage.getItem('gls_demo_enabled') === '1';
+    if (!_catalog.length && demoEnabled) {
       try {
         const sampleTree = {
           id: 'demo.music_scales',
@@ -106,7 +105,7 @@ async function resolveLiveUserId(){
   } finally {
     if (loading) loading.classList.add('hidden');
   }
-})();
+}
 function initHero(){
   const startBtn = document.getElementById('startLearningBtn');
   if (!startBtn) return;

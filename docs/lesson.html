@@ -88,14 +88,7 @@
 	<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 	<!-- Supabase JS (UMD) for live mode -->
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-	<script>
-		window.SUPABASE_URL = window.SUPABASE_URL || 'https://sohjyinqrxypeqiatanf.supabase.co';
-		window.SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNvaGp5aW5xcnh5cGVxaWF0YW5mIiwicm9zZSI6ImFub24iLCJpYXQiOjE3NjczODE2NTAsImV4cCI6MjA4Mjk1NzY1MH0.9A-yt1v6Wi3HUUFq3hcH8XHFzG4146KRYNjiXdnVQ_w';
-	</script>
-	<script type="module" src="js/supabaseClient.js?v=20260103"></script>
-	<script type="module" src="js/debugLogging.js?v=20260103"></script>
-	<script type="module" src="js/sessionBadge.js?v=20260103"></script>
-	<script type="module" src="js/player.js?v=20260103"></script>
-	<script type="module" src="js/headerControls.js?v=20260103"></script>
+	<!-- Single entrypoint for deterministic boot -->
+	<script type="module" src="js/pages/lesson.main.js?v=20260103"></script>
 </body>
 </html>

@@ -1,226 +1,409 @@
-# Copilot Instructions — Redesign Lesson Cards in `subtree_node.html` (Concept-Art Style)
+# Copilot Instructions — Clean Auth + Deterministic Boot (GitHub Pages + Supabase)
 
-## Goal
-Update the lesson cards in `subtree_node.html` so they match the new **minimal, aesthetic card design**:
-- The **thumbnail is the main body** (dominant visual area).
-- A small header row shows **Title + content type** (Video / Game / Quiz).
-- A single primary CTA button per card: **Watch / Play / Start**.
-- Cards look clean in dark mode, with soft shadows, rounded corners, and consistent spacing.
+Goal: Make **login state reliable and consistent** across all pages (no “looks logged out until hard refresh”). Remove race conditions caused by multiple independent module scripts, and centralize auth + config.
 
-You are working in a vanilla HTML/CSS/JS codebase (no frameworks unless already present). Keep changes localized, incremental, and avoid breaking existing data flows.
-
----
-
-## What to Change (High-level)
-1. **Replace current compact card layout** (tiny thumbnail, stacked text) with a new structure:
-   - Header: title (left) + type label + icon (right)
-   - Body: large thumbnail with overlay play/indicator icon
-   - Footer: one primary CTA button, optional small meta row (difficulty, duration)
-2. **Unify rendering** so video/game/quiz cards share one base template, with small visual differences.
-3. **Make cards responsive**: single column on narrow screens, multi-column grid on wide screens.
+> Constraints:
+> - Static site hosted on GitHub Pages (`/docs`)
+> - Supabase JS v2 UMD is used
+> - Keep current UI/HTML pages, but refactor JS orchestration + auth flow
+> - Avoid **top-level await** in feature modules (headerControls, etc.). Only allow `async` inside functions.
+> - Do not introduce a full framework. Vanilla ES modules only.
 
 ---
 
-## Files Likely Involved
-- `subtree_node.html` (or `subtree_node.js` if rendering is JS-driven)
-- Any CSS used by subtree pages (e.g. `styles.css`, `subtree.css`, etc.)
-- Data sources: `lessons.json`, `graph.json`, or the current lesson list object
+## 0) Define Done (Acceptance Criteria)
 
-> Do not rename files unless necessary. Prefer adding a small new CSS block and a render helper.
+A. On **normal refresh (Ctrl+R)** of `index.html` after signing in:
+- Header shows the correct state (avatar / logout) within 0–500ms after load.
+- No “Login / Sign Up” flash if the user is actually logged in (use a loading/skeleton state until auth resolved).
+
+B. On any page load:
+- Exactly one boot entry module is responsible for initialization order.
+- There is a single source of truth for auth state.
+
+C. Console:
+- No uncaught exceptions.
+- Clear logs show boot order and auth transitions.
+
+D. Cache coherence:
+- Deploys do not produce “HTML cached with mismatched JS set” behavior.
 
 ---
 
-## Target Visual Spec (Do this)
-### Card Structure (DOM)
-Create cards with this structure:
+## 1) Restructure Script Loading (Critical)
 
+### 1.1 Replace multiple `<script type="module">` tags per page
+For each page, reduce to **one** module entrypoint:
+
+**Example (index.html):**
 ```html
-<div class="lesson-card lesson-card--video">
-  <div class="lesson-card__header">
-    <div class="lesson-card__title">The Natural Alphabet</div>
-    <div class="lesson-card__type">
-      <span class="lesson-card__type-text">Video</span>
-      <span class="lesson-card__type-icon" aria-hidden="true">🎥</span>
-    </div>
-  </div>
-
-  <div class="lesson-card__thumb" role="button" tabindex="0" aria-label="Open lesson preview">
-    <img src="..." alt="Lesson thumbnail" />
-    <div class="lesson-card__overlay">
-      <div class="lesson-card__overlay-icon">▶</div>
-    </div>
-  </div>
-
-  <div class="lesson-card__meta">
-    <span class="lesson-pill">Beginner</span>
-    <span class="lesson-meta-dot">•</span>
-    <span class="lesson-meta-text">~3 min</span>
-  </div>
-
-  <div class="lesson-card__footer">
-    <button class="lesson-btn lesson-btn--primary">Watch</button>
-  </div>
-</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script type="module" src="./js/pages/index.main.js?v=20260103"></script>
 ```
 
-Notes:
-- The **thumbnail is the main body** (`lesson-card__thumb`).
-- Title is not inside the thumb; it is in the header.
-- **Only one primary button** in the footer.
-- Meta row is optional but recommended.
+Do this for:
+- `index.html` → `docs/js/pages/index.main.js`
+- `auth.html` → `docs/js/pages/auth.main.js`
+- `courses.html` → `docs/js/pages/courses.main.js`
+- `profile.html` → `docs/js/pages/profile.main.js`
+- Any other page that currently loads multiple modules
 
-### Content Types
-Cards are visually differentiated by a subtle accent:
-- Video: blue accent
-- Game: green accent
-- Quiz: purple accent
+**Remove** direct module tags for:
+- supabaseClient.js
+- headerControls.js
+- debugLogging.js
+- sessionBadge.js
+- page modules like home.js, courses.js, etc.
 
-This should be implemented with a class modifier:
-- `.lesson-card--video`
-- `.lesson-card--game`
-- `.lesson-card--quiz`
-
----
-
-## CSS Requirements
-Add CSS that works well on a dark background.
-
-### Card Base Styles
-Implement these:
-- rounded corners (`border-radius: 18-22px`)
-- soft shadow (no harsh outlines)
-- subtle border (e.g. `rgba(255,255,255,0.06)`)
-
-### Thumbnail Styles
-- large, wide rectangle (16:9-ish)
-- `overflow:hidden`, rounded corners
-- overlay icon centered (play icon for video, controller for game, checklist for quiz)
-- slight hover lift: transform translateY(-2px)
-
-### Responsive Grid
-Replace current single left-aligned stack with a grid:
-
-- On large screens: `grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));`
-- Gap: 18–24px
-- Center content within container.
+These must be imported from the single entrypoint in deterministic order.
 
 ---
 
-## Implementation Steps (Do in order)
-### Step 1 — Locate Rendering
-Find where cards are built:
-- Search for `"Step 1 Videos"`, `"Step 1 Quizzes"`, or for existing card class names.
-- Identify the function that maps lesson items into DOM.
-- You will replace the innerHTML/template used for each lesson item.
+## 2) Centralize Supabase Config (Remove Duplication)
 
-### Step 2 — Create a Single Renderer
-Create one function:
+Create: `docs/js/config.js`
 
 ```js
-function renderLessonCard(lesson) { ... return element; }
+export const SUPABASE_URL = "REPLACE_ME";
+export const SUPABASE_ANON_KEY = "REPLACE_ME";
+export const SUPABASE_STORAGE_KEY = "gls-auth";
+export const APP_VERSION = "20260103";
+export const IS_DEV = location.hostname === "localhost" || location.hostname === "127.0.0.1";
 ```
 
-Inputs:
-- `lesson.title`
-- `lesson.type` (`"video" | "game" | "quiz"`)
-- `lesson.thumbnail` (fallback to a default image)
-- `lesson.difficulty` (optional)
-- `lesson.duration` (optional)
-- `lesson.id` or route info (for Start/Watch/Play actions)
+Update ALL pages/scripts to stop embedding URL/key in HTML. Only `config.js` owns it.
 
-The renderer should:
-- apply `lesson-card--${lesson.type}`
-- set the icon + CTA label based on type
-- bind click handlers:
-  - clicking thumb should do same thing as CTA
-  - pressing Enter/Space on thumb triggers same action
+---
 
-### Step 3 — Update the Step Sections
-Currently you show:
-- Step X Videos
-- Step X Quizzes
+## 3) Make a Real Auth State Store (Single Source of Truth)
 
-Instead:
-- Keep the section headers (Step 1, Step 2)
-- Within each step, render one **grid** containing mixed content types, in an intentional order:
-  1. Video
-  2. Game (if present)
-  3. Quiz
+Create: `docs/js/auth/authStore.js`
 
-If you must keep separate “Videos/Quizzes” headers, still render with the same card component.
+### Requirements
+- Owns state: `{ status, session, user }`
+- `status`: `"unknown" | "authed" | "guest"`
+- Exposes:
+  - `initAuth()` — called once during boot, hydrates session
+  - `subscribe(fn)` — emits on any changes; returns unsubscribe
+  - `getState()` — returns current state
+  - `requireAuth({ redirectTo })` — helper for gated pages
+- Internally binds `supabase.auth.onAuthStateChange` once, and updates store.
+- Never requires feature modules to call `supabase.auth.getSession()` themselves unless absolutely necessary.
 
-### Step 4 — Fix Button/Action Logic
-Your current UI shows multiple buttons (e.g., Start + Watch Video). Remove duplicates:
-- Video card: button label = **Watch**
-- Quiz card: button label = **Start**
-- Game card: button label = **Play**
+Skeleton:
+```js
+import { getSupabase } from "./supabaseClient.js";
 
-If a quiz has an associated “Watch video” link, include it as a **small secondary text link** under the meta row (not as a second big button).
+const state = { status: "unknown", session: null, user: null };
+const listeners = new Set();
 
-Example:
+function emit() { for (const fn of listeners) fn({ ...state }); }
+
+export function getState() { return { ...state }; }
+export function subscribe(fn) { listeners.add(fn); fn(getState()); return () => listeners.delete(fn); }
+
+export async function initAuth() {
+	const supabase = getSupabase();
+
+	// 1) Hydrate session deterministically
+	state.status = "unknown";
+	emit();
+
+	const { data, error } = await supabase.auth.getSession();
+	if (error) console.error("[AUTH] getSession error", error);
+
+	state.session = data?.session ?? null;
+	state.user = data?.session?.user ?? null;
+	state.status = state.session ? "authed" : "guest";
+	emit();
+
+	// 2) Listen for changes
+	supabase.auth.onAuthStateChange((_event, session) => {
+		state.session = session ?? null;
+		state.user = session?.user ?? null;
+		state.status = session ? "authed" : "guest";
+		emit();
+	});
+}
+
+export function requireAuth({ redirectTo = "./auth.html" } = {}) {
+	const s = getState();
+	if (s.status === "unknown") return false; // caller should wait
+	if (s.status === "guest") {
+		location.href = redirectTo;
+		return false;
+	}
+	return true;
+}
+```
+
+---
+
+## 4) Refactor Supabase Client Wrapper (No Global Timing Races)
+
+Update: `docs/js/supabaseClient.js` (or move to `docs/js/auth/supabaseClient.js`)
+
+### Requirements
+- Expose a deterministic getter:
+  - `initSupabase()` called once during boot
+  - `getSupabase()` throws if called before init (fail fast)
+- Keep storage migration logic, but make it explicit and safe.
+- Remove/avoid any implicit “waitForSessionReady polling” for normal pages once authStore is in place.
+  - `waitForSessionReady()` can remain for edge cases, but the main flow should be: `initSupabase()` → `initAuth()`.
+
+Skeleton:
+```js
+import { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_STORAGE_KEY } from "../config.js";
+
+let supabase = null;
+
+export function initSupabase() {
+	if (supabase) return supabase;
+
+	// optional: migrate legacy keys here (targeted)
+	// DO NOT wipe broad localStorage keys.
+
+	supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+		auth: { persistSession: true, autoRefreshToken: true, storageKey: SUPABASE_STORAGE_KEY },
+	});
+
+	return supabase;
+}
+
+export function getSupabase() {
+	if (!supabase) throw new Error("Supabase not initialized. Call initSupabase() first.");
+	return supabase;
+}
+```
+
+---
+
+## 5) Header Controls Must Become an Init Function + Subscribe to AuthStore
+
+Update: `docs/js/headerControls.js`
+
+### Requirements
+- Must export: `initHeaderControls()`
+- Must NOT run at module top-level (no implicit boot)
+- Must NOT use top-level await
+- Must subscribe to `authStore.subscribe()` and render based on `{status, user}`
+- Must support 3 states:
+  - `unknown` → show loading state (no login flash)
+  - `guest` → show Login / Sign Up
+  - `authed` → show avatar + logout
+
+Skeleton:
+```js
+import { subscribe } from "./auth/authStore.js";
+
+export function initHeaderControls() {
+	console.log("[DEBUG] headerControls init");
+
+	const unsubscribe = subscribe((s) => {
+		try {
+			renderHeader(s);
+		} catch (e) {
+			console.error("[headerControls] render error", e);
+		}
+	});
+
+	return unsubscribe;
+}
+```
+
+Implement `renderHeader(state)` to update DOM.
+
+**Remove** storage event hacks unless truly required. If you keep them, they should call `initAuth()` or rely on supabase auth events, not DIY key-watching.
+
+---
+
+## 6) Page Entrypoints (Deterministic Orchestration)
+
+Create folder: `docs/js/pages/`
+
+### 6.1 Common boot helper
+Create: `docs/js/pages/boot.js`
+
+Responsibilities:
+- `initSupabase()`
+- start debug logging (optional)
+- `await initAuth()`
+- init header and common UI
+- then init page module
+
+Skeleton:
+```js
+import { initSupabase } from "../auth/supabaseClient.js";
+import { initAuth } from "../auth/authStore.js";
+import { initHeaderControls } from "../headerControls.js";
+
+export async function bootCommon({ initPage } = {}) {
+	console.log("[BOOT] start");
+
+	initSupabase();
+	await initAuth();
+	initHeaderControls();
+
+	if (initPage) await initPage();
+
+	console.log("[BOOT] done");
+}
+```
+
+### 6.2 index.main.js
+Create: `docs/js/pages/index.main.js`
+
+```js
+import { bootCommon } from "./boot.js";
+import { initHome } from "../home.js"; // refactor home.js to export initHome
+
+bootCommon({ initPage: initHome }).catch((e) => console.error("[BOOT] fatal", e));
+```
+
+### 6.3 auth.main.js
+Create: `docs/js/pages/auth.main.js`
+
+```js
+import { initSupabase } from "../auth/supabaseClient.js";
+import { initAuth } from "../auth/authStore.js";
+import { initAuthPage } from "../auth/auth_supabase.js";
+
+async function bootAuth() {
+	initSupabase();
+	await initAuth(); // sets initial state; auth page can react if already authed
+	initAuthPage();
+}
+
+bootAuth().catch((e) => console.error("[BOOT] fatal", e));
+```
+
+Refactor existing page scripts (home.js, courses.js, profile.js, etc.) to export `initX()` functions and remove module top-level side effects.
+
+---
+
+## 7) Fix Guest vs Local Demo Profile Boundary
+
+Problem: `storage.js` manages demo profiles (gep_*), but header relies on Supabase session. This creates “two truths”.
+
+### Requirements
+- Decide policy:
+  1) Supabase auth is the only “logged in” concept.
+  2) Demo profile is for guest mode only.
+- Implement:
+  - If `authStore.status === "authed"` → ignore demo profile UI.
+  - If `authStore.status === "guest"` → demo profile may render, but header must clearly show “Guest” and still show Login/Sign Up.
+
+Update any modules that treat “has local profile” as “logged in”.
+
+---
+
+## 8) Sign Out Cleanup (Make it Safe)
+
+### Requirements
+- Signing out must call `supabase.auth.signOut()` only.
+- Avoid broad localStorage wipes.
+- If legacy key cleanup is needed, remove **only** known legacy keys:
+  - `sb-*auth-token` from previous setups (targeted)
+  - your own old keys if documented
+- After sign out:
+  - authStore should transition to `guest`
+  - header updates automatically via subscription
+
+---
+
+## 9) Demo Seeding Gate (Prevent Production Weirdness)
+
+Update `home.js` demo seeding:
+- Only seed demo catalog when `IS_DEV === true` OR when a dedicated flag is present:
+  - `?demo=1` in URL, or
+  - `localStorage.gls_demo_enabled === "1"`
+- Never seed silently in production on live GitHub Pages.
+
+---
+
+## 10) Cache Coherency on GitHub Pages (Stop HTML/JS Mismatch)
+
+### Best practice (recommended)
+Switch from `?v=...` to versioned filenames for entrypoints:
+- `index.main.20260103.js` (or hashed)
+- update HTML to reference the new filename each deploy
+
+If you cannot do that yet:
+- Ensure index.html changes every deploy (embed `APP_VERSION` in HTML comment)
+- Apply the same `?v=` to:
+  - entry script
+  - CSS
+  - any injected partials/templates
+
+Optional meta tags (not guaranteed but can help):
 ```html
-<a class="lesson-link" href="...">Watch the related video</a>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
 ```
 
-### Step 5 — Replace Placeholder Thumbnails
-In the screenshot, thumbnails are broken. Add a robust fallback:
-- if `lesson.thumbnail` missing, use a default:
-  - `/assets/img/thumb_video_default.png`
-  - `/assets/img/thumb_quiz_default.png`
-  - `/assets/img/thumb_game_default.png`
+---
 
-If those don’t exist, create them or use a gradient placeholder (CSS).
+## 11) Logging (Make Failures Obvious)
 
-### Step 6 — Visual Polish
-- Ensure typography is consistent with the rest of the app.
-- Title: 18–22px, semibold
-- Type label: smaller, muted
-- Button: pill shape, aligned bottom-right or full-width (choose one; default: bottom-right like concept art)
+Add at top of each critical module:
+```js
+console.log("[DEBUG] <moduleName> loaded", new Date().toISOString());
+```
+
+In boot:
+- `[BOOT] start`
+- `[BOOT] supabase init ok`
+- `[BOOT] auth init done status=...`
+- `[BOOT] header init done`
+
+Make sure any async call `.catch(console.error)`.
 
 ---
 
-## Acceptance Checklist
-A change is “done” when:
-- Cards look like the provided concept art (thumbnail dominates)
-- Video/Game/Quiz are visually distinct but consistent
-- Only one primary CTA button per card
-- Hover and focus states work
-- Layout adapts from mobile (1 column) to desktop (grid)
-- Existing lesson start flows still work
+## 12) Checklist of Files to Change/Add
+
+### Add
+- `docs/js/config.js`
+- `docs/js/auth/authStore.js`
+- `docs/js/auth/supabaseClient.js` (or refactor existing)
+- `docs/js/pages/boot.js`
+- `docs/js/pages/index.main.js`
+- `docs/js/pages/auth.main.js`
+- (and per-page entrypoints for other pages)
+
+### Refactor
+- `docs/js/headerControls.js` → export `initHeaderControls()`, subscribe to authStore
+- `docs/js/home.js` → export `initHome()`, remove top-level side effects
+- `docs/js/auth/auth_supabase.js` → export `initAuthPage()`
+- Any other page script → export `initX()`
+
+### HTML
+- Each HTML page should include:
+  - Supabase UMD script
+  - Exactly one module script (page entrypoint)
 
 ---
 
-## Guardrails
-- Do not rewrite unrelated parts of the page.
-- Do not change underlying lesson progression rules.
-- Do not introduce a new framework.
-- Keep all existing logic for “Start lesson” intact; just rewire it to the new buttons/thumb click.
+## 13) Final Verification Steps
+
+1. Deploy to GitHub Pages.
+2. Open `auth.html` → sign in → navigate to `index.html`.
+3. Refresh with Ctrl+R five times:
+   - header must remain correct every time.
+4. Open a second tab to `index.html`:
+   - header must match.
+5. Sign out:
+   - header flips to guest immediately.
+6. Sign in again:
+   - header flips to authed immediately.
+7. Confirm no “loading stuck” states; if `status` remains `"unknown"` for >2s, log an error.
 
 ---
 
-## If You Need Clarifying Data From Code
-Before coding, print (in console or log) a sample lesson object structure so you map fields correctly:
-- `console.log("Lesson sample:", lesson);`
+## Implementation Notes
 
-Then adapt rendering to the actual keys.
+- Keep the existing `window.supabaseClient` if you want, but prefer **module exports** + controlled init.
+- The key is: **only boot.js controls timing**, and **authStore controls truth**.
+- Avoid “polling for hydration” unless you have a proven case that `getSession()` returns null briefly. If so, add a small bounded retry inside `initAuth()` (max 500–1000ms).
 
----
-
-## Suggested Class Names (Use these)
-- `.lesson-grid`
-- `.lesson-card`
-- `.lesson-card__header`, `__title`, `__type`
-- `.lesson-card__thumb`, `__overlay`, `__overlay-icon`
-- `.lesson-card__meta`
-- `.lesson-btn`, `.lesson-btn--primary`
-- `.lesson-link` (small secondary link)
-- modifiers: `.lesson-card--video`, `--game`, `--quiz`
-
----
-
-## Deliverable
-Implement:
-1) Updated HTML/JS rendering in `subtree_node.html` (or its JS module)
-2) CSS appended to the subtree stylesheet (or in a `<style>` block if that’s how the project is structured)
-
-Keep changes readable and easy to iterate on.

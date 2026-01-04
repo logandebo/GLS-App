@@ -1,5 +1,6 @@
 // Versioned import to avoid stale module cache on normal refresh
 import { ACTIVE_USER_KEY } from './storage.js?v=20260103';
+import { subscribe } from './auth/authStore.js?v=20260103';
 
 try { console.log('[DEBUG] headerControls.start'); } catch {}
 
@@ -26,28 +27,15 @@ async function resolveLiveName(){
   return null;
 }
 
-async function updateHeaderControls(){
+function renderHeader(state){
   const loginBtn = document.getElementById('header-login');
   const signupBtn = document.getElementById('header-signup');
   const avatar = document.getElementById('header-profile-avatar');
-
-  // Robust session detection: rely on session presence, not just display name
-  const sb = window.supabaseClient;
-  let loggedIn = false;
-  let name = null;
-  try {
-    if (sb && sb.isConfigured && sb.isConfigured()){
-      const { data } = await sb.getSession();
-      const user = data && data.session ? data.session.user : null;
-      loggedIn = Boolean(user);
-      if (loggedIn){
-        const liveName = await resolveLiveName();
-        name = liveName || (user && (user.email||'').split('@')[0]) || null;
-      }
-    }
-  } catch {}
-
-  try { console.log(`[DEBUG] headerControls.update -> loggedIn=${loggedIn} name=${name||'none'}`); } catch {}
+  const loggedIn = state.status === 'authed';
+  const user = state.user;
+  const meta = user?.user_metadata || {};
+  const name = [meta.full_name, meta.preferred_username, meta.username, meta.name].find(v => typeof v === 'string' && v.trim()) || (user?.email||'').split('@')[0] || null;
+  try { console.log(`[DEBUG] headerControls.render -> status=${state.status} name=${name||'none'}`); } catch {}
 
   if (loggedIn){
     if (loginBtn) loginBtn.style.display = 'none';
@@ -121,26 +109,17 @@ function bindEvents(){
   document.addEventListener('touchstart', handleLogoutEvent, { capture: true });
   document.addEventListener('pointerdown', handleLogoutEvent, { capture: true });
   document.addEventListener('click', handleLogoutEvent, { capture: true });
-  const sb = window.supabaseClient;
-  try { if (sb && sb.isConfigured && sb.isConfigured()) sb.onAuthStateChange(() => updateHeaderControls()); } catch {}
-  window.addEventListener('storage', (e)=>{
-    // Ignore demo storage keys for header state
-    if (e.key && e.key.startsWith('sb-')) updateHeaderControls();
-  });
+  // Auth store drives header updates; no extra storage listeners.
 }
 
-try { bindEvents(); console.log('[DEBUG] headerControls.bound'); } catch (e) { try { console.log('[DEBUG] headerControls.error bindEvents', e); } catch {} }
-// Ensure Supabase session is hydrated before initial header update to avoid flicker
-try {
-  if (window.supabaseClient && window.supabaseClient.waitForSessionReady) {
-    await window.supabaseClient.waitForSessionReady(2500, 150);
-  }
-} catch (e) { try { console.log('[DEBUG] headerControls.error waitForSessionReady', e); } catch {} }
-try { await updateHeaderControls(); } catch (e) { try { console.log('[DEBUG] headerControls.error updateHeaderControls', e); } catch {} }
-// In case Supabase session hydration is slightly delayed on some pages,
-// run a quick follow-up check to update header state.
-setTimeout(() => { updateHeaderControls(); }, 300);
-setTimeout(() => { updateHeaderControls(); }, 1000);
+export function initHeaderControls(){
+  console.log('[DEBUG] headerControls init');
+  try { bindEvents(); console.log('[DEBUG] headerControls.bound'); } catch (e) { console.log('[DEBUG] headerControls.error bindEvents', e); }
+  const unsubscribe = subscribe((s) => {
+    try { renderHeader(s); } catch (e) { console.error('[headerControls] render error', e); }
+  });
+  return unsubscribe;
+}
 
 // Click-based dropdown toggles for header menus
 (function initDropdowns(){
