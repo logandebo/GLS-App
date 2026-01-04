@@ -1,4 +1,7 @@
-import { ACTIVE_USER_KEY } from './storage.js';
+// Versioned import to avoid stale module cache on normal refresh
+import { ACTIVE_USER_KEY } from './storage.js?v=20260103';
+
+try { console.log('[DEBUG] headerControls.start'); } catch {}
 
 function setAvatarText(el, name){
   if (!el) return;
@@ -126,8 +129,14 @@ function bindEvents(){
   });
 }
 
-bindEvents();
-updateHeaderControls();
+try { bindEvents(); console.log('[DEBUG] headerControls.bound'); } catch (e) { try { console.log('[DEBUG] headerControls.error bindEvents', e); } catch {} }
+// Ensure Supabase session is hydrated before initial header update to avoid flicker
+try {
+  if (window.supabaseClient && window.supabaseClient.waitForSessionReady) {
+    await window.supabaseClient.waitForSessionReady(2500, 150);
+  }
+} catch (e) { try { console.log('[DEBUG] headerControls.error waitForSessionReady', e); } catch {} }
+try { await updateHeaderControls(); } catch (e) { try { console.log('[DEBUG] headerControls.error updateHeaderControls', e); } catch {} }
 // In case Supabase session hydration is slightly delayed on some pages,
 // run a quick follow-up check to update header state.
 setTimeout(() => { updateHeaderControls(); }, 300);
