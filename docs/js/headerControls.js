@@ -28,9 +28,23 @@ async function updateHeaderControls(){
   const signupBtn = document.getElementById('header-signup');
   const avatar = document.getElementById('header-profile-avatar');
 
-  const liveName = await resolveLiveName();
-  const name = liveName || null;
-  const loggedIn = Boolean(name);
+  // Robust session detection: rely on session presence, not just display name
+  const sb = window.supabaseClient;
+  let loggedIn = false;
+  let name = null;
+  try {
+    if (sb && sb.isConfigured && sb.isConfigured()){
+      const { data } = await sb.getSession();
+      const user = data && data.session ? data.session.user : null;
+      loggedIn = Boolean(user);
+      if (loggedIn){
+        const liveName = await resolveLiveName();
+        name = liveName || (user && (user.email||'').split('@')[0]) || null;
+      }
+    }
+  } catch {}
+
+  try { console.log(`[DEBUG] headerControls.update -> loggedIn=${loggedIn} name=${name||'none'}`); } catch {}
 
   if (loggedIn){
     if (loginBtn) loginBtn.style.display = 'none';
