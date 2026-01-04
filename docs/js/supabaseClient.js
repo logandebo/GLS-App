@@ -37,6 +37,23 @@ function onAuthStateChange(callback) {
 	return () => sub.subscription.unsubscribe();
 }
 
+// Wait for session hydration after navigation. Polls until a session is available
+// or a timeout is reached. Returns true if a session was found, false otherwise.
+async function waitForSessionReady(maxMs = 2000, intervalMs = 150) {
+	try {
+		if (!client) return false;
+		const start = Date.now();
+		while (Date.now() - start < maxMs) {
+			const { data } = await client.auth.getSession();
+			if (data && data.session) return true;
+			await new Promise((r) => setTimeout(r, intervalMs));
+		}
+		return false;
+	} catch {
+		return false;
+	}
+}
+
 async function signInWithEmail(email, password) {
 	if (!client) throw new Error('Supabase not configured');
 	return client.auth.signInWithPassword({ email, password });
@@ -59,5 +76,6 @@ window.supabaseClient = {
 	signInWithEmail,
 	signUpWithEmail,
 	signOut,
+	waitForSessionReady,
 	_raw: client
 };

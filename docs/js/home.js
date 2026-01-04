@@ -35,6 +35,8 @@ async function resolveLiveUserId(){
 (async function init(){
   const loading = document.getElementById('loading-state');
   try {
+    // Wait briefly for Supabase session hydration after navigation
+    try { if (window.supabaseClient && window.supabaseClient.isConfigured()) { await window.supabaseClient.waitForSessionReady(2500, 150); } } catch {}
     // Determine live user id if signed in (no demo fallback)
     _liveUserId = await resolveLiveUserId();
     // Homepage is accessible when logged out; do not enforce demo or redirect.
