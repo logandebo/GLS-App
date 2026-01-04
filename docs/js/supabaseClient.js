@@ -4,7 +4,22 @@ const hasConfig = Boolean(window.SUPABASE_URL && window.SUPABASE_ANON_KEY);
 
 let client = null;
 if (hasConfig && window.supabase && typeof window.supabase.createClient === 'function') {
-	client = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+	try {
+		client = window.supabase.createClient(
+			window.SUPABASE_URL,
+			window.SUPABASE_ANON_KEY,
+			{
+				auth: {
+					persistSession: true,
+					autoRefreshToken: true,
+					// Use a stable storage key so session persists across pages consistently
+					storageKey: 'gls-auth'
+				}
+			}
+		);
+	} catch (e) {
+		console.warn('[Supabase] createClient failed', e);
+	}
 }
 
 function isConfigured() {
