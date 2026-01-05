@@ -3,7 +3,7 @@
 import { /* getActiveUsername, getActiveProfile, migrateLegacyProfileIfNeeded, ensureActiveUserOrRedirect, setActiveUsername */ } from './storage.js';
 import { APP_VERSION, IS_DEV } from './config.js';
 import { subscribe, getState } from './auth/authStore.js?v=20260103';
-import { loadPublicCatalog, loadTreeMetrics, savePublicCatalog, saveTreeMetrics, refreshPublicCatalogFromCloud } from './catalogStore.js';
+import { loadPublicCatalog, loadTreeMetrics, savePublicCatalog, saveTreeMetrics } from './catalogStore.js';
 import { loadAllLessons } from './contentLoader.js';
 import { loadUserTreeProgress } from './userTreeProgress.js';
 import { loadUserPreferences } from './preferences.js';
@@ -44,13 +44,6 @@ export async function initHome(){
     subscribe((ns) => { _liveUserId = ns.user ? (ns.user.user_metadata?.username || (ns.user.email||'').split('@')[0]) : null; renderPersonalized(); });
     // Homepage is accessible when logged out; do not enforce demo or redirect.
     _catalog = loadPublicCatalog();
-    // Try to refresh catalog from cloud in background
-    try {
-      const ok = await refreshPublicCatalogFromCloud();
-      if (ok) {
-        _catalog = loadPublicCatalog();
-      }
-    } catch {}
     // If no published catalog exists, only seed in dev or with explicit demo flag
     const demoEnabled = IS_DEV || new URLSearchParams(location.search).get('demo') === '1' || localStorage.getItem('gls_demo_enabled') === '1';
     if (!_catalog.length && demoEnabled) {

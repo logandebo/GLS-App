@@ -1,6 +1,5 @@
 // Catalog & Metrics helpers for published Creator Trees
 import { loadCustomConcepts, loadPublicConcepts, savePublicConcepts } from './contentLoader.js';
-import { fetchPublishedCreatorTrees } from './supabaseStore.js';
 import { graphStoreLoaded, getNode as getMasterNode } from './graphStore.js';
 // Storage keys:
 // - gep_publicCreatorTrees: array of published trees (global catalog)
@@ -35,51 +34,6 @@ export function loadPublicCatalog() {
     return list;
   } catch {
     return [];
-  }
-}
-
-// Refresh local catalog cache from Supabase (public courses). Safe to call on startup.
-export async function refreshPublicCatalogFromCloud() {
-  try {
-    const { trees, error } = await fetchPublishedCreatorTrees();
-    if (error) return false;
-    const list = Array.isArray(trees) ? trees : [];
-    // Map Supabase rows to local catalog schema
-    const mapped = list.map((row) => {
-      const t = row?.tree_json || {};
-      // Ensure required fields
-      const nodes = Array.isArray(t.nodes) ? t.nodes.map(n => ({
-        conceptId: n.conceptId,
-        nextIds: Array.isArray(n.nextIds) ? n.nextIds.slice() : [],
-        ...(Array.isArray(n.subtreeLessonIds) ? { subtreeLessonIds: n.subtreeLessonIds.slice() } : {}),
-        ...(n.subtreeLessonSteps && typeof n.subtreeLessonSteps === 'object' ? { subtreeLessonSteps: { ...n.subtreeLessonSteps } } : {}),
-        ...(n.ui ? { ui: { x: Number(n.ui.x)||0, y: Number(n.ui.y)||0 } } : {}),
-        unlockConditions: {
-          requiredConceptIds: Array.isArray(n.unlockConditions?.requiredConceptIds) ? n.unlockConditions.requiredConceptIds.slice() : [],
-          minBadge: n.unlockConditions?.minBadge || 'none',
-          ...(n.unlockConditions?.customRuleId ? { customRuleId: n.unlockConditions.customRuleId } : {})
-        }
-      })) : [];
-      return {
-        id: row.id,
-        title: t.title || row.title || 'Untitled Tree',
-        description: t.description || '',
-        creatorId: t.creatorId || 'unknown',
-        primaryDomain: t.primaryDomain || 'general',
-        tags: Array.isArray(t.tags) ? t.tags.slice() : [],
-        rootConceptId: t.rootConceptId || '',
-        introVideoUrl: t.introVideoUrl || '',
-        ui: { layoutMode: (t.ui && t.ui.layoutMode) ? String(t.ui.layoutMode) : 'top-down' },
-        nodes,
-        version: Number.isFinite(t.version) ? t.version : 1,
-        createdAt: t.createdAt || row.created_at || new Date().toISOString(),
-        updatedAt: t.updatedAt || row.created_at || new Date().toISOString()
-      };
-    });
-    savePublicCatalog(mapped);
-    return true;
-  } catch {
-    return false;
   }
 }
 

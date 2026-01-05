@@ -66,8 +66,7 @@
         <input id="importTreeInput" type="file" accept="application/json" style="display:none;" />
       </div>
       <div style="margin-top:0.5rem; display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-        <button id="publishTreeBtn" class="btn" type="button" title="Publish to Courses (Cloud): Requires Supabase configured (see js/config.js), signed-in user, and Supabase table 'creator_trees' with public read policy. On success, the course is uploaded and marked public.">Publish</button>
-        <button id="publishHelpBtn" class="btn subtle small" type="button" title="How to publish to cloud:\n1) Configure SUPABASE_URL and SUPABASE_ANON_KEY (js/config.js).\n2) Ensure the Supabase UMD script loads (already included on this page).\n3) Sign in (Login/Sign Up in header).\n4) In Supabase, create table 'creator_trees' with RLS: public can select when is_published=true; owners can insert/update/delete their rows.\n5) Click Publish; you should see 'Cloud course published' and the status banner change to 'Cloud: Published'.">?</button>
+        <button id="publishTreeBtn" class="btn" type="button" title="Publish to Courses">Publish</button>
         <button id="unpublishTreeBtn" class="btn secondary" type="button" title="Remove from Courses">Unpublish</button>
         <label style="display:flex; gap:0.4rem; align-items:center;">
           <span>Mode:</span>
@@ -84,7 +83,6 @@
           <span>Snap</span>
         </label>
       </div>
-      <div id="cloudPublishStatus" class="short muted" style="margin-top:0.5rem;" aria-live="polite">Cloud: Local only — not published</div>
       <div id="visualEditor" class="card subtle hidden" style="margin-top:0.75rem;">
         <h3>Visual Editor</h3>
         <div style="display:grid; grid-template-columns: 2fr 1fr; gap:0.75rem; align-items:start; margin-top:0.5rem;">

@@ -8,8 +8,8 @@
 	<link rel="stylesheet" href="css/components.css" />
 		<style>
 			/* Tidy layout for auth cards and live form rows */
-			.auth-main { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; justify-content: center; min-height: 70vh; }
-			.auth-card { flex: 1 1 380px; max-width: 560px; }
+			.auth-main { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+			.auth-card { flex: 1 1 380px; }
 			.live-form .form-row { display: flex; align-items: center; gap: 0.75rem; margin: 0.5rem 0; }
 			.live-form .form-row label { min-width: 110px; white-space: nowrap; }
 			.live-form .form-row input { flex: 1; }
@@ -25,7 +25,7 @@
 		<h1 class="site-title">Learning Hub</h1>
 	</header>
 	<main class="auth-main">
-		<section class="auth-card" style="display:none;">
+		<section class="auth-card">
 			<h2>Demo Version</h2>
 			<p>Explore without an email. Local-only demo profile.</p>
 			<form id="auth-form">
@@ -69,23 +69,8 @@
 					<div class="auth-actions">
 						<button id="supabase-signin" type="button">Sign In</button>
 						<button id="supabase-signup" type="button" style="display:none;">Sign Up</button>
-						<a id="supabase-forgot-link" href="#forgot" style="margin-left:auto; font-size:0.9rem;">Forgot password?</a>
 					</div>
 				</form>
-				<!-- Forgot password panel -->
-				<section id="supabase-forgot-panel" class="live-form" style="display:none; margin-top:0.75rem;">
-					<h3 style="margin:0 0 0.5rem;">Reset your password</h3>
-					<p style="margin:0 0 0.5rem;">Enter your email and we’ll send you a reset link.</p>
-					<div class="form-row">
-						<label for="forgot-email">Email</label>
-						<input id="forgot-email" type="email" placeholder="you@example.com" />
-					</div>
-					<div class="auth-actions">
-						<button id="forgot-send" type="button">Send reset link</button>
-						<a id="forgot-back" href="#login" style="margin-left:auto; font-size:0.9rem;">Back to login</a>
-					</div>
-					<div id="forgot-status" class="auth-status"></div>
-				</section>
 				<div class="auth-actions" id="supabase-logout-container" style="display:none;">
 					<button id="supabase-logout" type="button">Log Out</button>
 					<button id="supabase-enter" type="button">Enter Live Site</button>

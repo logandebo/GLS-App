@@ -3,7 +3,6 @@ import { loadCustomConcepts, loadAllLessons, CUSTOM_LESSONS_KEY } from './conten
 import { migrateLegacyProfileIfNeeded, ensureActiveUserOrRedirect, getActiveProfile, createDefaultProfile, saveActiveProfile, getActiveUsername } from './storage.js';
 import { renderToast } from './ui.js';
 import { publishTree as publishToCatalog, unpublishTree as unpublishFromCatalog, getLastPublishMissingConceptIds } from './catalogStore.js';
-import { createCreatorTree as sbCreateCreatorTree, updateCreatorTree as sbUpdateCreatorTree, setCreatorTreePublished as sbSetCreatorTreePublished, fetchOwnCreatorTrees as sbFetchOwnCreatorTrees, deleteCreatorTree as sbDeleteCreatorTree, deleteCreatorTreeByLocalId as sbDeleteByLocalId, unpublishCreatorTreeByLocalId as sbUnpublishByLocalId } from './supabaseStore.js';
 import { loadPublicConcepts, savePublicConcepts } from './contentLoader.js';
 import { loadCreatorTrees, createCreatorTree, getCreatorTree, addNodeToTree, connectNodes, updateCreatorTree, saveCreatorTrees, exportCreatorTree, importCreatorTree, validateCreatorTree, buildMasterIndex, updateUnlockConditions, deleteCreatorTree, setNodeNextIds } from './creatorTreeStore.js';
 import { renderSubtreeGraph } from './subtreeGraphView.js';
@@ -91,7 +90,6 @@ function initControls(){
   const importInput = document.getElementById('importTreeInput');
   const deleteBtn = document.getElementById('deleteTreeBtn');
   const publishBtn = document.getElementById('publishTreeBtn');
-  const publishHelpBtn = document.getElementById('publishHelpBtn');
   const unpublishBtn = document.getElementById('unpublishTreeBtn');
   const editorMode = document.getElementById('editorMode');
   const autoLayoutBtn = document.getElementById('autoLayoutBtn');
@@ -111,7 +109,6 @@ function initControls(){
   importInput.addEventListener('change', handleImportTree);
   deleteBtn && deleteBtn.addEventListener('click', deleteCurrentTree);
   publishBtn.addEventListener('click', publishCurrentTree);
-  publishHelpBtn && publishHelpBtn.addEventListener('click', showPublishHelp);
   unpublishBtn.addEventListener('click', unpublishCurrentTree);
   treeSelect.addEventListener('change', () => loadSelectedTree(treeSelect.value));
   editorMode && editorMode.addEventListener('change', onModeChange);
@@ -122,19 +119,6 @@ function initControls(){
   createConceptBtn && createConceptBtn.addEventListener('click', () => createNewConcept());
   introVideoUploadBtn && introVideoUploadBtn.addEventListener('click', () => uploadIntroVideo());
   introVideoClearBtn && introVideoClearBtn.addEventListener('click', () => clearIntroVideo());
-}
-
-function showPublishHelp(){
-  const lines = [
-    'Cloud publish requires:',
-    '1) SUPABASE_URL and SUPABASE_ANON_KEY configured (js/config.js).',
-    '2) Supabase UMD script loaded (already on this page).',
-    '3) Signed-in user (use Login/Sign Up in the header).',
-    "4) Supabase table 'creator_trees' with RLS policies: public can select when is_published=true; owners can insert/update/delete their rows.",
-    '5) Click Publish; you should see Cloud success toasts and the banner change to Cloud: Published.'
-  ];
-  try { renderToast(lines.join(' '), 'info'); }
-  catch { alert(lines.join('\n')); }
 }
 
 function startLessonsWatcher(){
@@ -218,7 +202,6 @@ function loadSelectedTree(treeId){
   if (modeSel) { modeSel.value = 'visual'; onModeChange(); }
   refreshVisualEditor();
   renderIntroVideoPreview();
-  renderCloudPublishStatus();
 }
 
 function migratePrivateTreeIfNeeded(userId, tree){
@@ -515,25 +498,6 @@ function publishCurrentTree(){
     if (Array.isArray(missing) && missing.length){
       renderToast(`Warning: ${missing.length} concepts referenced by this course were not found and may appear broken for learners.`, 'warning');
     }
-    // Attempt cloud publish to Supabase so courses are public to everyone
-    (async () => {
-      try {
-        // If this tree already has a Supabase row id, update it; else create then mark published
-        const supabaseId = tree.supabaseId || null;
-        if (supabaseId) {
-          const { error: upErr } = await sbUpdateCreatorTree(supabaseId, { title: tree.title || 'Untitled', tree_json: tree, is_published: true });
-          if (!upErr) { renderToast('Cloud course updated', 'info'); renderCloudPublishStatus(); }
-        } else {
-          const { id, error: createErr } = await sbCreateCreatorTree(tree.title || 'Untitled', tree);
-          if (id && !createErr) {
-            const { error: pubErr } = await sbSetCreatorTreePublished(id, true);
-            // Save back supabase id to local tree for future updates
-            updateCreatorTree(userId, tree.id, { supabaseId: id });
-            if (!pubErr) { renderToast('Cloud course published', 'success'); renderCloudPublishStatus(); }
-          }
-        }
-      } catch {}
-    })();
   } catch(err){ renderToast('Publish failed', 'error'); }
 }
 
@@ -544,107 +508,7 @@ function unpublishCurrentTree(){
   try {
     const removed = unpublishFromCatalog(_currentTreeId);
     renderToast(removed ? 'Unpublished from Courses' : 'Not found in Courses', removed ? 'info' : 'warning');
-    renderCloudPublishStatus();
-    // Also remove from Supabase for the owner if it exists
-    (async () => {
-      try {
-        try {
-          // Ensure session is ready before attempting cloud operations
-          if (window.supabaseClient && window.supabaseClient.isConfigured()) {
-            await window.supabaseClient.waitForSessionReady(2000, 150);
-          }
-        } catch {}
-        // Log auth/session context at delete time
-        try {
-          const { data } = await (window.supabaseClient ? window.supabaseClient.getSession() : Promise.resolve({ data: null }));
-          const sessUser = data && data.session ? data.session.user : null;
-          console.debug('[DELETE-DIAG] Auth context at delete', {
-            hasSession: !!(data && data.session),
-            user_id: sessUser ? sessUser.id : null,
-            storageKey: (await import('./config.js')).SUPABASE_STORAGE_KEY || null
-          });
-        } catch {}
-        const userId = getActiveUsername();
-        const tree = getCreatorTree(userId, _currentTreeId);
-        let supabaseId = tree && tree.supabaseId;
-        // If supabaseId is missing, try to resolve by title or tree_json.id from owner trees
-        if (!supabaseId) {
-          try {
-            const { trees } = await sbFetchOwnCreatorTrees();
-            const match = (trees || []).find(r => {
-              const tj = r?.tree_json || {};
-              return (r.title === (tree.title || '')) || (tj.id && tj.id === tree.id);
-            });
-            if (match && match.id) {
-              supabaseId = match.id;
-              updateCreatorTree(userId, tree.id, { supabaseId });
-            }
-          } catch {}
-        }
-        if (supabaseId) {
-          const { ok, error } = await sbDeleteCreatorTree(supabaseId);
-          if (ok && !error) {
-            updateCreatorTree(userId, tree.id, { supabaseId: null });
-            renderToast('Cloud course removed', 'info');
-            renderCloudPublishStatus();
-          } else {
-            console.warn('Cloud delete failed', error);
-            // Fallback: mark as not published in cloud so it is no longer public
-            const { error: upErr } = await sbUpdateCreatorTree(supabaseId, { is_published: false });
-            if (!upErr) {
-              renderToast('Cloud course set to draft (unpublished)', 'info');
-              renderCloudPublishStatus();
-            } else {
-              renderToast('Cloud unpublish failed', 'error');
-            }
-          }
-        } else {
-          // Try by local id match inside tree_json as a fallback
-          const del = await sbDeleteByLocalId(tree.id);
-          if (del.ok) {
-            updateCreatorTree(userId, tree.id, { supabaseId: null });
-            renderToast('Cloud course removed (by local id)', 'info');
-            renderCloudPublishStatus();
-          } else {
-            const up = await sbUnpublishByLocalId(tree.id);
-            if (up.ok) {
-              renderToast('Cloud course set to draft (by local id)', 'info');
-              renderCloudPublishStatus();
-            } else {
-              renderToast('Cloud id not found; could not unpublish', 'warning');
-            }
-          }
-        }
-      } catch {}
-    })();
   } catch{ renderToast('Unpublish failed', 'error'); }
-}
-
-function renderCloudPublishStatus(){
-  try {
-    const el = document.getElementById('cloudPublishStatus');
-    if (!el) return;
-    const sb = window.supabaseClient;
-    if (!sb || !sb.isConfigured || !sb.isConfigured()) { el.textContent = 'Cloud: Not connected — local only'; return; }
-    sb.getSession().then(({ data }) => {
-      const user = data && data.session ? data.session.user : null;
-      if (!user) { el.textContent = 'Cloud: Not signed in — local only'; return; }
-      const userId = getActiveUsername();
-      const tree = _currentTreeId ? getCreatorTree(userId, _currentTreeId) : null;
-      if (!tree || !tree.supabaseId) { el.textContent = 'Cloud: Local only — not published'; return; }
-      // Verify published state from cloud for owner
-      (async () => {
-        try {
-          const { trees } = await sbFetchOwnCreatorTrees();
-          const row = (trees || []).find(r => r.id === tree.supabaseId);
-          if (row && row.is_published) el.textContent = 'Cloud: Published';
-          else el.textContent = 'Cloud: Draft — not public';
-        } catch {
-          el.textContent = 'Cloud: Published (status sync unavailable)';
-        }
-      })();
-    }).catch(() => { el.textContent = 'Cloud: Local only — not published'; });
-  } catch {}
 }
 
 function deleteCurrentTree(){
