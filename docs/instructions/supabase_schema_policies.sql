@@ -40,12 +40,27 @@ create policy "insert own trees"
   for insert
   with check (auth.uid() = owner_id);
 
+-- Update own trees
+drop policy if exists "update own trees" on creator_trees;
+create policy "update own trees"
+  on creator_trees
+  for update
+  using (auth.uid() = owner_id)
+  with check (auth.uid() = owner_id);
+
 -- Public read for published trees
 drop policy if exists "public read published trees" on creator_trees;
 create policy "public read published trees"
   on creator_trees
   for select
   using (is_published = true);
+
+-- Delete own trees
+drop policy if exists "delete own trees" on creator_trees;
+create policy "delete own trees"
+  on creator_trees
+  for delete
+  using (auth.uid() = owner_id);
 
 -- Policies for user_progress
 -- Read own progress

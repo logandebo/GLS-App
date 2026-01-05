@@ -57,16 +57,22 @@ function bindEvents(){
   if (signoutBtn) signoutBtn.addEventListener('click', async (e) => {
     e.preventDefault(); e.stopPropagation();
     const scheduleReload = (delay=500) => { try { return setTimeout(()=>{ try{ window.location.reload(); }catch{} }, delay); } catch { return null; } };
-    const clearSupabaseAuthLocally = () => {
+    const clearSupabaseAuthLocally = async () => {
       try {
-        const keys = Object.keys(localStorage);
-        keys.forEach(k => { if (k.startsWith('sb-') || k.includes('supabase')) localStorage.removeItem(k); });
+        // Remove current storage key and legacy sb-* auth keys
+        const { SUPABASE_STORAGE_KEY } = await import('./config.js');
+        if (SUPABASE_STORAGE_KEY) localStorage.removeItem(SUPABASE_STORAGE_KEY);
+        const keys = Object.keys(localStorage || {});
+        keys.filter(k => k.startsWith('sb-') && k.includes('auth')).forEach(k => localStorage.removeItem(k));
+        // Set logout guard to block migration on next init
+        localStorage.setItem('gls-auth-logged-out', '1');
+        console.log('[AUTH] header logout cleared tokens and set logged-out flag');
       } catch {}
     };
     const timer = scheduleReload(500);
     try { if (window.supabaseClient && window.supabaseClient.isConfigured()) await window.supabaseClient.signOut(); } catch {}
     try { localStorage.removeItem(ACTIVE_USER_KEY); } catch {}
-    clearSupabaseAuthLocally();
+    await clearSupabaseAuthLocally();
     // Directly toggle UI for reliability
     const avatar = document.getElementById('header-profile-avatar');
     if (avatar) avatar.classList.add('hidden');
@@ -84,16 +90,20 @@ function bindEvents(){
     if (isLogout){
       e.preventDefault(); e.stopPropagation();
       const scheduleReload = (delay=500) => { try { return setTimeout(()=>{ try{ window.location.reload(); }catch{} }, delay); } catch { return null; } };
-      const clearSupabaseAuthLocally = () => {
+      const clearSupabaseAuthLocally = async () => {
         try {
-          const keys = Object.keys(localStorage);
-          keys.forEach(k => { if (k.startsWith('sb-') || k.includes('supabase')) localStorage.removeItem(k); });
+          const { SUPABASE_STORAGE_KEY } = await import('./config.js');
+          if (SUPABASE_STORAGE_KEY) localStorage.removeItem(SUPABASE_STORAGE_KEY);
+          const keys = Object.keys(localStorage || {});
+          keys.filter(k => k.startsWith('sb-') && k.includes('auth')).forEach(k => localStorage.removeItem(k));
+          localStorage.setItem('gls-auth-logged-out', '1');
+          console.log('[AUTH] header delegated logout cleared tokens and set logged-out flag');
         } catch {}
       };
       const timer = scheduleReload(500);
       try { if (window.supabaseClient && window.supabaseClient.isConfigured()) await window.supabaseClient.signOut(); } catch {}
       try { localStorage.removeItem(ACTIVE_USER_KEY); } catch {}
-      clearSupabaseAuthLocally();
+      await clearSupabaseAuthLocally();
       const avatar = document.getElementById('header-profile-avatar');
       const loginBtn2 = document.getElementById('header-login');
       const signupBtn2 = document.getElementById('header-signup');

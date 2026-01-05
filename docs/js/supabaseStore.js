@@ -99,12 +99,20 @@ export async function updateCreatorTree(id, patch) {
 	if (!c) return { ok: false, error: new Error('Supabase not configured') };
 	const { user } = await getAuthUser();
 	if (!user) return { ok: false, error: new Error('No auth user') };
-	const { error } = await c
+	const { data, error } = await c
 		.from('creator_trees')
 		.update(patch || {})
 		.eq('id', id)
-		.eq('owner_id', user.id);
-	return { ok: !error, error };
+		.eq('owner_id', user.id)
+		.select('id, is_published')
+		.maybeSingle();
+	try {
+		console.debug('[DELETE-DIAG] updateCreatorTree request', {
+			table: 'creator_trees', method: 'UPDATE', id, owner_id: user.id, patch: patch || {}
+		});
+		if (error) console.warn('[DELETE-DIAG] updateCreatorTree error', error);
+	} catch {}
+	return { ok: !error && !!data, error, data };
 }
 
 export async function deleteCreatorTree(id) {
@@ -112,12 +120,58 @@ export async function deleteCreatorTree(id) {
 	if (!c) return { ok: false, error: new Error('Supabase not configured') };
 	const { user } = await getAuthUser();
 	if (!user) return { ok: false, error: new Error('No auth user') };
-	const { error } = await c
+	const { data, error } = await c
 		.from('creator_trees')
 		.delete()
 		.eq('id', id)
-		.eq('owner_id', user.id);
-	return { ok: !error, error };
+		.eq('owner_id', user.id)
+		.select('id');
+	const count = Array.isArray(data) ? data.length : 0;
+	try {
+		console.debug('[DELETE-DIAG] deleteCreatorTree request', {
+			table: 'creator_trees', method: 'DELETE', id, owner_id: user.id, selected: 'id', deletedCount: count
+		});
+		if (error) console.error('[DELETE-DIAG] deleteCreatorTree error', error);
+	} catch {}
+	return { ok: !error && count > 0, error, count };
+}
+
+// Fallback helpers: operate by matching local tree id inside tree_json
+export async function unpublishCreatorTreeByLocalId(localTreeId) {
+	const c = getClient();
+	if (!c) return { ok: false, error: new Error('Supabase not configured') };
+	const { user } = await getAuthUser();
+	if (!user) return { ok: false, error: new Error('No auth user') };
+	const { data, error } = await c
+		.from('creator_trees')
+		.update({ is_published: false })
+		.eq('owner_id', user.id)
+		.contains('tree_json', { id: localTreeId })
+		.select('id')
+		.limit(1);
+	const count = Array.isArray(data) ? data.length : 0;
+	return { ok: !error && count > 0, error, count };
+}
+
+export async function deleteCreatorTreeByLocalId(localTreeId) {
+	const c = getClient();
+	if (!c) return { ok: false, error: new Error('Supabase not configured') };
+	const { user } = await getAuthUser();
+	if (!user) return { ok: false, error: new Error('No auth user') };
+	const { data, error } = await c
+		.from('creator_trees')
+		.delete()
+		.eq('owner_id', user.id)
+		.contains('tree_json', { id: localTreeId })
+		.select('id');
+	const count = Array.isArray(data) ? data.length : 0;
+	try {
+		console.debug('[DELETE-DIAG] deleteCreatorTreeByLocalId request', {
+			table: 'creator_trees', method: 'DELETE', owner_id: user.id, filter_contains_tree_json_id: localTreeId, selected: 'id', deletedCount: count
+		});
+		if (error) console.error('[DELETE-DIAG] deleteCreatorTreeByLocalId error', error);
+	} catch {}
+	return { ok: !error && count > 0, error, count };
 }
 
 export async function setCreatorTreePublished(id, isPublished) {
