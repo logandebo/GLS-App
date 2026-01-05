@@ -1,7 +1,7 @@
 import { getActiveProfile } from './storage.js?v=20260103';
 import { subscribe, getState } from './auth/authStore.js?v=20260103';
 import { renderToast } from './ui.js';
-import { loadPublicCatalog, loadTreeMetrics } from './catalogStore.js';
+import { loadPublicCatalog, loadTreeMetrics, refreshPublicCatalogFromCloud } from './catalogStore.js';
 import { loadGraphStore, getAllNodes as gsGetAllNodes } from './graphStore.js';
 import { loadAllLessons } from './contentLoader.js';
 import { loadUserTreeProgress } from './userTreeProgress.js';
@@ -16,6 +16,13 @@ export async function initCourses(){
   _masterIndex = new Map(gsGetAllNodes().map(n => [n.id, n]));
   initFilters();
   renderCatalog();
+  // Refresh catalog from cloud in background, then re-render
+  try {
+    const ok = await refreshPublicCatalogFromCloud();
+    if (ok) {
+      renderCatalog();
+    }
+  } catch {}
   // Optionally load lessons to enhance cards with counts and progress
   try {
     _allLessons = await loadAllLessons();

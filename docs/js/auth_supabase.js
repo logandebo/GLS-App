@@ -18,18 +18,15 @@ const signupBtn = document.getElementById('supabase-signup');
 const logoutContainer = document.getElementById('supabase-logout-container');
 const logoutBtn = document.getElementById('supabase-logout');
 const enterBtn = document.getElementById('supabase-enter');
-
-// Forgot password elements
 const forgotLink = document.getElementById('supabase-forgot-link');
 const forgotPanel = document.getElementById('supabase-forgot-panel');
-const forgotBackLink = document.getElementById('supabase-forgot-back');
-const forgotEmailEl = document.getElementById('supabase-forgot-email');
-const forgotSendBtn = document.getElementById('supabase-forgot-send');
-const forgotStatusEl = document.getElementById('supabase-forgot-status');
+const forgotEmailEl = document.getElementById('forgot-email');
+const forgotSendBtn = document.getElementById('forgot-send');
+const forgotBackLink = document.getElementById('forgot-back');
+const forgotStatusEl = document.getElementById('forgot-status');
 
 function setStatus(text) {
 	if (statusEl) statusEl.textContent = text || '';
-}
 }
 
 function showLoggedInUI() {
@@ -44,6 +41,7 @@ function showLoggedOutUI() {
 	if (formEl) formEl.style.display = 'block';
 	if (tabSignin) tabSignin.style.display = 'inline-block';
 	if (tabSignup) tabSignup.style.display = 'inline-block';
+	if (forgotPanel) forgotPanel.style.display = 'none';
 }
 
 async function refreshSessionUI() {
@@ -53,6 +51,9 @@ async function refreshSessionUI() {
 		return;
 	}
 	const { data, error } = await window.supabaseClient.getSession();
+	try {
+		console.log('[AUTH] refreshSessionUI session', { hasSession: !!(data && data.session), user_id: data?.session?.user?.id || null });
+	} catch {}
 	if (error) {
 		setStatus('Error fetching session.');
 		showLoggedOutUI();
@@ -128,9 +129,14 @@ function bindEvents() {
 					setStatus(`Sign-in failed: ${error.message}`);
 					return;
 				}
+				// Ensure session persisted, then redirect straight to home
+				try {
+					await window.supabaseClient.waitForSessionReady(3000, 150);
+					const { data: s } = await window.supabaseClient.getSession();
+					if (s?.session) { window.location.href = 'index.html'; return; }
+				} catch {}
+				// Fallback: refresh UI if session isn’t ready yet
 				await refreshSessionUI();
-				// Allow user to choose when to enter; also show Enter Live Site button
-				if (enterBtn) enterBtn.focus();
 			} catch (e) {
 				setStatus('Sign-in failed. Check credentials.');
 			}
@@ -154,6 +160,12 @@ function bindEvents() {
 					setStatus(`Sign-up failed: ${error.message}`);
 					return;
 				}
+				// If confirmation disabled and session is ready, redirect; else notify
+				try {
+					await window.supabaseClient.waitForSessionReady(3000, 150);
+					const { data: s } = await window.supabaseClient.getSession();
+					if (s?.session) { window.location.href = 'index.html'; return; }
+				} catch {}
 				await refreshSessionUI();
 				setStatus('Sign-up initiated. Check email if confirmation enabled.');
 			} catch (e) {
@@ -164,7 +176,39 @@ function bindEvents() {
 	if (logoutBtn) {
 		logoutBtn.addEventListener('click', async () => {
 			try {
+				// Log session BEFORE signOut
+				try {
+					const { data } = await window.supabaseClient.getSession();
+					console.log('[AUTH] Logout click BEFORE signOut', { hasSession: !!(data && data.session), user_id: data?.session?.user?.id || null });
+				} catch {}
 				await window.supabaseClient.signOut();
+				// Proactively clear current and legacy Supabase auth tokens to prevent session resurrection
+				try {
+					const { SUPABASE_STORAGE_KEY } = await import('./config.js');
+					if (SUPABASE_STORAGE_KEY) {
+						localStorage.removeItem(SUPABASE_STORAGE_KEY);
+					}
+					const keys = Object.keys(localStorage || {});
+					keys.filter(k => k.startsWith('sb-') && k.includes('auth'))
+						.forEach(k => localStorage.removeItem(k));
+					// Set a flag indicating an explicit logout occurred to block migration
+					localStorage.setItem('gls-auth-logged-out', '1');
+				} catch {}
+				// Log localStorage state AFTER logout token clearing
+				try {
+					const keysAfter = Object.keys(localStorage || {});
+					const authKeysAfter = keysAfter.filter(k => k.includes('auth') || k.startsWith('sb-'));
+					console.log('[AUTH] Logout AFTER clearing tokens', {
+						keys: keysAfter,
+						authKeys: authKeysAfter,
+						glsAuth: (await import('./config.js')).SUPABASE_STORAGE_KEY ? localStorage.getItem((await import('./config.js')).SUPABASE_STORAGE_KEY) : null
+					});
+				} catch {}
+				// Log session AFTER signOut
+				try {
+					const { data } = await window.supabaseClient.getSession();
+					console.log('[AUTH] Logout AFTER signOut session', { hasSession: !!(data && data.session), user_id: data?.session?.user?.id || null });
+				} catch {}
 				await refreshSessionUI();
 			} catch (e) {
 				setStatus('Logout failed.');
@@ -194,6 +238,9 @@ function setMode(next){
 	if (signupBtn) signupBtn.style.display = mode==='signup' ? 'inline-block' : 'none';
 	if (confirmRow) confirmRow.style.display = mode==='signup' ? 'flex' : 'none';
 	if (confirmEmailRow) confirmEmailRow.style.display = mode==='signup' ? 'flex' : 'none';
+	// Forgot password link only in Sign In mode; also close panel when switching away
+	if (forgotLink) forgotLink.style.display = mode==='signin' ? 'inline-block' : 'none';
+	if (mode==='signup' && forgotPanel) { forgotPanel.style.display = 'none'; if (formEl) formEl.style.display = 'block'; }
 	// Username only for sign-up (to store display name)
 	if (usernameRow) usernameRow.style.display = mode==='signup' ? 'flex' : 'none';
 	// Email visible in both modes

@@ -1,409 +1,217 @@
-# Copilot Instructions — Clean Auth + Deterministic Boot (GitHub Pages + Supabase)
+# Copilot Instruction File — Implement “Forgot Password” (Supabase) for Luden
 
-Goal: Make **login state reliable and consistent** across all pages (no “looks logged out until hard refresh”). Remove race conditions caused by multiple independent module scripts, and centralize auth + config.
-
-> Constraints:
-> - Static site hosted on GitHub Pages (`/docs`)
-> - Supabase JS v2 UMD is used
-> - Keep current UI/HTML pages, but refactor JS orchestration + auth flow
-> - Avoid **top-level await** in feature modules (headerControls, etc.). Only allow `async` inside functions.
-> - Do not introduce a full framework. Vanilla ES modules only.
+Goal: Add a professional, secure “Forgot password” flow that emails the user a **reset link** and lets them set a **new password** (never reveals the old password). Use Supabase Auth (supabase-js v2 UMD) consistent with existing `supabaseClient.js` wrapper.
 
 ---
 
-## 0) Define Done (Acceptance Criteria)
+## 0) High-level UX (what users experience)
 
-A. On **normal refresh (Ctrl+R)** of `index.html` after signing in:
-- Header shows the correct state (avatar / logout) within 0–500ms after load.
-- No “Login / Sign Up” flash if the user is actually logged in (use a loading/skeleton state until auth resolved).
-
-B. On any page load:
-- Exactly one boot entry module is responsible for initialization order.
-- There is a single source of truth for auth state.
-
-C. Console:
-- No uncaught exceptions.
-- Clear logs show boot order and auth transitions.
-
-D. Cache coherence:
-- Deploys do not produce “HTML cached with mismatched JS set” behavior.
+1. On the Login screen there is a **“Forgot password?”** link.
+2. User enters their email → clicks **Send reset link**.
+3. UI shows a professional neutral message like:
+   - “If an account exists for that email, we’ve sent a password reset link.”
+   (Do not confirm whether the email exists.)
+4. User clicks link in email → lands on a **Reset Password** page.
+5. They enter **New password** + **Confirm** → submit.
+6. Show success message → offer a button to go to Login.
 
 ---
 
-## 1) Restructure Script Loading (Critical)
+## 1) Supabase dashboard configuration (required)
 
-### 1.1 Replace multiple `<script type="module">` tags per page
-For each page, reduce to **one** module entrypoint:
+### 1.1 Set Site URL and Redirect URLs
+In Supabase: **Authentication → URL Configuration**
+- **Site URL:** set to your production site root (GitHub Pages URL), e.g.
+  - `https://<your-github-username>.github.io/<repo>/`
+- **Redirect URLs:** add *both* prod and local dev:
+  - `https://<your-github-username>.github.io/<repo>/reset_password.html`
+  - `http://localhost:8000/reset_password.html` (or whatever dev port you use)
 
-**Example (index.html):**
-```html
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script type="module" src="./js/pages/index.main.js?v=20260103"></script>
-```
+These must match the URL you pass as `redirectTo`.
 
-Do this for:
-- `index.html` → `docs/js/pages/index.main.js`
-- `auth.html` → `docs/js/pages/auth.main.js`
-- `courses.html` → `docs/js/pages/courses.main.js`
-- `profile.html` → `docs/js/pages/profile.main.js`
-- Any other page that currently loads multiple modules
+### 1.2 Email delivery quality (recommended)
+In Supabase: **Authentication → Email Templates**
+- Customize the “Reset password” template:
+  - Keep the reset link variable intact.
+  - Add your branding (“Luden”) and short instructions.
 
-**Remove** direct module tags for:
-- supabaseClient.js
-- headerControls.js
-- debugLogging.js
-- sessionBadge.js
-- page modules like home.js, courses.js, etc.
-
-These must be imported from the single entrypoint in deterministic order.
+Optional but recommended for “big company” feel:
+- Configure **Custom SMTP** (Supabase: Auth → SMTP) so emails come from your domain.
+  - Otherwise Supabase sends using its defaults (fine for v0.1).
 
 ---
 
-## 2) Centralize Supabase Config (Remove Duplication)
+## 2) Files to add/edit
 
-Create: `docs/js/config.js`
+### 2.1 Add page: `docs/reset_password.html`
+Create a dedicated reset page. It should:
+- Detect a valid recovery session from the URL after Supabase redirect.
+- Prompt user for a new password (and confirm).
+- Call Supabase to update password.
+- Handle errors gracefully (expired link, weak password, etc.)
 
-```js
-export const SUPABASE_URL = "REPLACE_ME";
-export const SUPABASE_ANON_KEY = "REPLACE_ME";
-export const SUPABASE_STORAGE_KEY = "gls-auth";
-export const APP_VERSION = "20260103";
-export const IS_DEV = location.hostname === "localhost" || location.hostname === "127.0.0.1";
-```
+### 2.2 Edit page: `docs/auth.html`
+Add:
+- A “Forgot password?” link under the login form.
+- A “Forgot password panel/modal/section” with:
+  - Email input
+  - “Send reset link” button
+  - “Back to login” link
 
-Update ALL pages/scripts to stop embedding URL/key in HTML. Only `config.js` owns it.
+### 2.3 Add/Update script: `docs/js/auth_supabase.js` (or create `forgot_password.js`)
+Implement:
+- `requestPasswordReset(email)`
+- `handlePasswordRecoveryOnResetPage()`
+- `submitNewPassword(newPassword)`
 
----
-
-## 3) Make a Real Auth State Store (Single Source of Truth)
-
-Create: `docs/js/auth/authStore.js`
-
-### Requirements
-- Owns state: `{ status, session, user }`
-- `status`: `"unknown" | "authed" | "guest"`
-- Exposes:
-  - `initAuth()` — called once during boot, hydrates session
-  - `subscribe(fn)` — emits on any changes; returns unsubscribe
-  - `getState()` — returns current state
-  - `requireAuth({ redirectTo })` — helper for gated pages
-- Internally binds `supabase.auth.onAuthStateChange` once, and updates store.
-- Never requires feature modules to call `supabase.auth.getSession()` themselves unless absolutely necessary.
-
-Skeleton:
-```js
-import { getSupabase } from "./supabaseClient.js";
-
-const state = { status: "unknown", session: null, user: null };
-const listeners = new Set();
-
-function emit() { for (const fn of listeners) fn({ ...state }); }
-
-export function getState() { return { ...state }; }
-export function subscribe(fn) { listeners.add(fn); fn(getState()); return () => listeners.delete(fn); }
-
-export async function initAuth() {
-	const supabase = getSupabase();
-
-	// 1) Hydrate session deterministically
-	state.status = "unknown";
-	emit();
-
-	const { data, error } = await supabase.auth.getSession();
-	if (error) console.error("[AUTH] getSession error", error);
-
-	state.session = data?.session ?? null;
-	state.user = data?.session?.user ?? null;
-	state.status = state.session ? "authed" : "guest";
-	emit();
-
-	// 2) Listen for changes
-	supabase.auth.onAuthStateChange((_event, session) => {
-		state.session = session ?? null;
-		state.user = session?.user ?? null;
-		state.status = session ? "authed" : "guest";
-		emit();
-	});
-}
-
-export function requireAuth({ redirectTo = "./auth.html" } = {}) {
-	const s = getState();
-	if (s.status === "unknown") return false; // caller should wait
-	if (s.status === "guest") {
-		location.href = redirectTo;
-		return false;
-	}
-	return true;
-}
-```
+Use the *existing* `window.supabaseClient` wrapper if present.
+If wrapper lacks needed methods, extend `supabaseClient.js`.
 
 ---
 
-## 4) Refactor Supabase Client Wrapper (No Global Timing Races)
+## 3) Implementation details (Supabase JS v2 UMD)
 
-Update: `docs/js/supabaseClient.js` (or move to `docs/js/auth/supabaseClient.js`)
+### 3.1 Request reset email
+Use:
+- `supabase.auth.resetPasswordForEmail(email, { redirectTo })`
 
-### Requirements
-- Expose a deterministic getter:
-  - `initSupabase()` called once during boot
-  - `getSupabase()` throws if called before init (fail fast)
-- Keep storage migration logic, but make it explicit and safe.
-- Remove/avoid any implicit “waitForSessionReady polling” for normal pages once authStore is in place.
-  - `waitForSessionReady()` can remain for edge cases, but the main flow should be: `initSupabase()` → `initAuth()`.
+Requirements:
+- `redirectTo` must be one of the allowed redirect URLs in Supabase settings.
 
-Skeleton:
-```js
-import { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_STORAGE_KEY } from "../config.js";
+Security UX:
+- Always show the same success message regardless of whether the email exists.
 
-let supabase = null;
+### 3.2 Reset password page: handle recovery session
+Supabase sends users back with auth data in the URL (often in the hash `#`).
+On page load:
+1. Initialize Supabase client normally.
+2. Call `supabase.auth.getSession()` and/or listen to `supabase.auth.onAuthStateChange`.
+3. Supabase typically triggers `PASSWORD_RECOVERY` event or provides a session.
+4. If no valid recovery session exists:
+   - Show “This reset link is invalid or expired. Request a new one.”
+   - Provide a link back to `auth.html` with the forgot panel open.
 
-export function initSupabase() {
-	if (supabase) return supabase;
+Implementation approach:
+- Register `onAuthStateChange((event, session) => { ... })`
+- If `event === 'PASSWORD_RECOVERY'` OR session exists and page is reset:
+  - show the new password form.
 
-	// optional: migrate legacy keys here (targeted)
-	// DO NOT wipe broad localStorage keys.
+### 3.3 Set the new password
+Use:
+- `supabase.auth.updateUser({ password: newPassword })`
 
-	supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-		auth: { persistSession: true, autoRefreshToken: true, storageKey: SUPABASE_STORAGE_KEY },
-	});
-
-	return supabase;
-}
-
-export function getSupabase() {
-	if (!supabase) throw new Error("Supabase not initialized. Call initSupabase() first.");
-	return supabase;
-}
-```
-
----
-
-## 5) Header Controls Must Become an Init Function + Subscribe to AuthStore
-
-Update: `docs/js/headerControls.js`
-
-### Requirements
-- Must export: `initHeaderControls()`
-- Must NOT run at module top-level (no implicit boot)
-- Must NOT use top-level await
-- Must subscribe to `authStore.subscribe()` and render based on `{status, user}`
-- Must support 3 states:
-  - `unknown` → show loading state (no login flash)
-  - `guest` → show Login / Sign Up
-  - `authed` → show avatar + logout
-
-Skeleton:
-```js
-import { subscribe } from "./auth/authStore.js";
-
-export function initHeaderControls() {
-	console.log("[DEBUG] headerControls init");
-
-	const unsubscribe = subscribe((s) => {
-		try {
-			renderHeader(s);
-		} catch (e) {
-			console.error("[headerControls] render error", e);
-		}
-	});
-
-	return unsubscribe;
-}
-```
-
-Implement `renderHeader(state)` to update DOM.
-
-**Remove** storage event hacks unless truly required. If you keep them, they should call `initAuth()` or rely on supabase auth events, not DIY key-watching.
+Then:
+- Show success state.
+- OPTIONAL: Immediately `signOut()` to force re-login with new password (recommended for clarity).
+  - Some apps keep the user signed in; either is acceptable, but “big company” feel is typically: reset → success → login.
 
 ---
 
-## 6) Page Entrypoints (Deterministic Orchestration)
+## 4) Password policy (professional defaults)
 
-Create folder: `docs/js/pages/`
+Enforce client-side validation *before* calling update:
+- Minimum 8 characters (prefer 10–12).
+- Must include at least 1 letter and 1 number (optionally 1 symbol).
+- New password and confirm must match.
 
-### 6.1 Common boot helper
-Create: `docs/js/pages/boot.js`
+Also display server-side errors verbatim (sanitized) when Supabase rejects:
+- e.g., “Password should be at least 6 characters” depending on project settings.
 
-Responsibilities:
-- `initSupabase()`
-- start debug logging (optional)
-- `await initAuth()`
-- init header and common UI
-- then init page module
-
-Skeleton:
-```js
-import { initSupabase } from "../auth/supabaseClient.js";
-import { initAuth } from "../auth/authStore.js";
-import { initHeaderControls } from "../headerControls.js";
-
-export async function bootCommon({ initPage } = {}) {
-	console.log("[BOOT] start");
-
-	initSupabase();
-	await initAuth();
-	initHeaderControls();
-
-	if (initPage) await initPage();
-
-	console.log("[BOOT] done");
-}
-```
-
-### 6.2 index.main.js
-Create: `docs/js/pages/index.main.js`
-
-```js
-import { bootCommon } from "./boot.js";
-import { initHome } from "../home.js"; // refactor home.js to export initHome
-
-bootCommon({ initPage: initHome }).catch((e) => console.error("[BOOT] fatal", e));
-```
-
-### 6.3 auth.main.js
-Create: `docs/js/pages/auth.main.js`
-
-```js
-import { initSupabase } from "../auth/supabaseClient.js";
-import { initAuth } from "../auth/authStore.js";
-import { initAuthPage } from "../auth/auth_supabase.js";
-
-async function bootAuth() {
-	initSupabase();
-	await initAuth(); // sets initial state; auth page can react if already authed
-	initAuthPage();
-}
-
-bootAuth().catch((e) => console.error("[BOOT] fatal", e));
-```
-
-Refactor existing page scripts (home.js, courses.js, profile.js, etc.) to export `initX()` functions and remove module top-level side effects.
+Do NOT implement “security questions”.
+Do NOT ever show existing passwords.
 
 ---
 
-## 7) Fix Guest vs Local Demo Profile Boundary
+## 5) UI requirements (professional)
 
-Problem: `storage.js` manages demo profiles (gep_*), but header relies on Supabase session. This creates “two truths”.
+### 5.1 Forgot password panel
+- Title: “Reset your password”
+- Copy: “Enter your email and we’ll send you a reset link.”
+- Button: “Send reset link”
+- After submission:
+  - show neutral success message
+  - disable the button for ~5–10 seconds to prevent spam-clicking
+  - show small “Didn’t get it? Check spam or try again.”
 
-### Requirements
-- Decide policy:
-  1) Supabase auth is the only “logged in” concept.
-  2) Demo profile is for guest mode only.
+### 5.2 Reset password page
+- Title: “Create a new password”
+- Fields:
+  - New password
+  - Confirm new password
+- Provide show/hide password toggle
+- Provide inline validation messages
+- Provide success state with button: “Back to login”
+
+---
+
+## 6) Concrete tasks for Copilot (step-by-step)
+
+### Task A — Update `supabaseClient.js` wrapper (if needed)
+Check if wrapper already exposes these. If not, add:
+- `resetPasswordForEmail(email, redirectTo)`
+- `updatePassword(newPassword)` (calls `supabase.auth.updateUser`)
+- Ensure `storageKey` is consistent and no “session resurrection” regression.
+
+### Task B — Implement forgot password UI in `auth.html`
+- Add link/button under login form.
+- Add a “forgot password view” (either separate section or modal).
+- Wire events in `auth_supabase.js`.
+
+### Task C — Create `reset_password.html`
+- Include the Supabase UMD script(s) same as other pages.
+- Include `supabaseClient.js`.
+- Include a new `reset_password.js` (or extend `auth_supabase.js`).
 - Implement:
-  - If `authStore.status === "authed"` → ignore demo profile UI.
-  - If `authStore.status === "guest"` → demo profile may render, but header must clearly show “Guest” and still show Login/Sign Up.
+  - `initResetPasswordPage()` on DOMContentLoaded
+  - It should:
+    - wait for session hydration
+    - detect PASSWORD_RECOVERY/session
+    - render correct UI state
 
-Update any modules that treat “has local profile” as “logged in”.
+### Task D — Add robust error handling
+Handle:
+- Missing/expired link
+- Weak password
+- Network errors
+- User closes tab mid-flow
 
----
-
-## 8) Sign Out Cleanup (Make it Safe)
-
-### Requirements
-- Signing out must call `supabase.auth.signOut()` only.
-- Avoid broad localStorage wipes.
-- If legacy key cleanup is needed, remove **only** known legacy keys:
-  - `sb-*auth-token` from previous setups (targeted)
-  - your own old keys if documented
-- After sign out:
-  - authStore should transition to `guest`
-  - header updates automatically via subscription
-
----
-
-## 9) Demo Seeding Gate (Prevent Production Weirdness)
-
-Update `home.js` demo seeding:
-- Only seed demo catalog when `IS_DEV === true` OR when a dedicated flag is present:
-  - `?demo=1` in URL, or
-  - `localStorage.gls_demo_enabled === "1"`
-- Never seed silently in production on live GitHub Pages.
+### Task E — Verify end-to-end
+Checklist:
+1. Login page shows “Forgot password?” and opens panel.
+2. Enter email → neutral success message.
+3. Email arrives with link.
+4. Link opens reset page.
+5. Set new password successfully.
+6. User can log in with new password; old password fails.
+7. Refresh/reset page after success does not break auth state.
 
 ---
 
-## 10) Cache Coherency on GitHub Pages (Stop HTML/JS Mismatch)
+## 7) Suggested code structure (simple + maintainable)
 
-### Best practice (recommended)
-Switch from `?v=...` to versioned filenames for entrypoints:
-- `index.main.20260103.js` (or hashed)
-- update HTML to reference the new filename each deploy
+- `docs/auth.html`
+- `docs/reset_password.html`
+- `docs/js/supabaseClient.js`
+- `docs/js/auth_supabase.js`
+- `docs/js/reset_password.js` (new)
 
-If you cannot do that yet:
-- Ensure index.html changes every deploy (embed `APP_VERSION` in HTML comment)
-- Apply the same `?v=` to:
-  - entry script
-  - CSS
-  - any injected partials/templates
-
-Optional meta tags (not guaranteed but can help):
-```html
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-<meta http-equiv="Pragma" content="no-cache" />
-<meta http-equiv="Expires" content="0" />
-```
+Avoid duplicating client initialization.
+Ensure all pages import the same `supabaseClient.js`.
 
 ---
 
-## 11) Logging (Make Failures Obvious)
-
-Add at top of each critical module:
-```js
-console.log("[DEBUG] <moduleName> loaded", new Date().toISOString());
-```
-
-In boot:
-- `[BOOT] start`
-- `[BOOT] supabase init ok`
-- `[BOOT] auth init done status=...`
-- `[BOOT] header init done`
-
-Make sure any async call `.catch(console.error)`.
+## 8) Notes on Supabase Auth settings you may need to tweak
+- If you want stronger password rules, check Supabase Auth settings for password strength (if available in your plan/version).
+- If emails aren’t arriving reliably, set up SMTP.
+- If redirect fails, it’s almost always because Redirect URLs aren’t whitelisted.
 
 ---
 
-## 12) Checklist of Files to Change/Add
+## 9) Deliverables Copilot must produce
+1. Working forgot-password UI on `auth.html`
+2. Working `reset_password.html` page
+3. Minimal changes to existing auth logic (no regressions)
+4. Clear comments explaining where to update URLs for prod/dev
+5. Short test instructions at the bottom of the PR/summary
 
-### Add
-- `docs/js/config.js`
-- `docs/js/auth/authStore.js`
-- `docs/js/auth/supabaseClient.js` (or refactor existing)
-- `docs/js/pages/boot.js`
-- `docs/js/pages/index.main.js`
-- `docs/js/pages/auth.main.js`
-- (and per-page entrypoints for other pages)
-
-### Refactor
-- `docs/js/headerControls.js` → export `initHeaderControls()`, subscribe to authStore
-- `docs/js/home.js` → export `initHome()`, remove top-level side effects
-- `docs/js/auth/auth_supabase.js` → export `initAuthPage()`
-- Any other page script → export `initX()`
-
-### HTML
-- Each HTML page should include:
-  - Supabase UMD script
-  - Exactly one module script (page entrypoint)
-
----
-
-## 13) Final Verification Steps
-
-1. Deploy to GitHub Pages.
-2. Open `auth.html` → sign in → navigate to `index.html`.
-3. Refresh with Ctrl+R five times:
-   - header must remain correct every time.
-4. Open a second tab to `index.html`:
-   - header must match.
-5. Sign out:
-   - header flips to guest immediately.
-6. Sign in again:
-   - header flips to authed immediately.
-7. Confirm no “loading stuck” states; if `status` remains `"unknown"` for >2s, log an error.
-
----
-
-## Implementation Notes
-
-- Keep the existing `window.supabaseClient` if you want, but prefer **module exports** + controlled init.
-- The key is: **only boot.js controls timing**, and **authStore controls truth**.
-- Avoid “polling for hydration” unless you have a proven case that `getSession()` returns null briefly. If so, add a small bounded retry inside `initAuth()` (max 500–1000ms).
-
+End.
