@@ -519,6 +519,27 @@ function publishCurrentTree(){
     // Attempt cloud publish to Supabase (DAL courses) so courses are public to everyone
     (async () => {
       try {
+        // Ensure session is ready before attempting cloud operations
+        try {
+          if (window.supabaseClient && window.supabaseClient.isConfigured()) {
+            await window.supabaseClient.waitForSessionReady(2000, 150);
+          }
+        } catch {}
+        // Log auth/session context at publish time
+        let sessUser = null;
+        try {
+          const { data } = await (window.supabaseClient ? window.supabaseClient.getSession() : Promise.resolve({ data: null }));
+          sessUser = data && data.session ? data.session.user : null;
+          console.debug('[PUBLISH-DIAG] Auth context at publish', {
+            hasSession: !!(data && data.session),
+            user_id: sessUser ? sessUser.id : null,
+            storageKey: (await import('./config.js')).SUPABASE_STORAGE_KEY || null
+          });
+        } catch {}
+        if (!sessUser) {
+          renderToast('Sign in to cloud to publish course', 'warning');
+          return; // Skip cloud publish if not authenticated
+        }
         // Snapshot current visual positions before publish
         try {
           if (_graphApi && typeof _graphApi.getNodePositions === 'function'){
@@ -565,9 +586,11 @@ function publishCurrentTree(){
         if (supabaseId) {
           const { error: upErr } = await dsUpsertCourse({ id: supabaseId, title: tree.title || 'Untitled', description: tree.description || '', slug: stableSlug, tree_json: tree, is_published: true });
           if (!upErr) { renderToast('Cloud course updated', 'info'); renderCloudPublishStatus(); }
+          else { renderToast('Cloud publish failed (update). Check slug/id conflicts.', 'error'); }
         } else {
           const { id, error: upErr } = await dsUpsertCourse({ id: tree.id, title: tree.title || 'Untitled', description: tree.description || '', slug: stableSlug, tree_json: tree, is_published: true });
           if (id && !upErr) { updateCreatorTree(userId, tree.id, { supabaseId: id }); renderToast('Cloud course published', 'success'); renderCloudPublishStatus(); }
+          else { renderToast('Cloud publish failed (insert). Check slug uniqueness.', 'error'); }
         }
       } catch {}
     })();
