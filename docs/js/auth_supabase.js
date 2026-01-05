@@ -97,10 +97,14 @@ function bindEvents() {
 			// Disable button briefly to avoid spam-clicking
 			forgotSendBtn.disabled = true;
 			try {
-				// Compute redirectTo pointing to reset_password.html alongside auth.html.
-				// Note: Ensure this exact URL is whitelisted in Supabase Auth → URL Configuration (prod + dev).
-				// For GitHub Pages, update as needed to your repository path.
-				const redirectTo = new URL('reset_password.html', window.location.href).toString();
+				// Compute environment-aware redirectTo (hosted vs local).
+				// Hosted (GitHub Pages): https://logandebo.github.io/GLS-App/reset_password.html
+				// Local dev: http://localhost:8080/reset_password.html
+				// Ensure both URLs are whitelisted in Supabase Auth → URL Configuration.
+				const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+				const redirectTo = isLocal
+					? 'http://localhost:8080/reset_password.html'
+					: 'https://logandebo.github.io/GLS-App/reset_password.html';
 				const { error } = await window.supabaseClient.resetPasswordForEmail(email, redirectTo);
 				if (error) {
 					if (forgotStatusEl) forgotStatusEl.textContent = `Request failed: ${error.message}`;
