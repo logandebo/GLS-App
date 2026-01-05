@@ -19,8 +19,17 @@ const logoutContainer = document.getElementById('supabase-logout-container');
 const logoutBtn = document.getElementById('supabase-logout');
 const enterBtn = document.getElementById('supabase-enter');
 
+// Forgot password elements
+const forgotLink = document.getElementById('supabase-forgot-link');
+const forgotPanel = document.getElementById('supabase-forgot-panel');
+const forgotBackLink = document.getElementById('supabase-forgot-back');
+const forgotEmailEl = document.getElementById('supabase-forgot-email');
+const forgotSendBtn = document.getElementById('supabase-forgot-send');
+const forgotStatusEl = document.getElementById('supabase-forgot-status');
+
 function setStatus(text) {
 	if (statusEl) statusEl.textContent = text || '';
+}
 }
 
 function showLoggedInUI() {
@@ -60,6 +69,54 @@ async function refreshSessionUI() {
 }
 
 function bindEvents() {
+	// Forgot password: open panel
+	if (forgotLink) {
+		forgotLink.addEventListener('click', (e) => {
+			e.preventDefault();
+			if (formEl) formEl.style.display = 'none';
+			if (forgotPanel) forgotPanel.style.display = 'block';
+			if (forgotEmailEl && emailEl?.value) forgotEmailEl.value = emailEl.value;
+			if (forgotStatusEl) forgotStatusEl.textContent = '';
+		});
+	}
+	// Forgot password: back to login
+	if (forgotBackLink) {
+		forgotBackLink.addEventListener('click', (e) => {
+			e.preventDefault();
+			if (forgotPanel) forgotPanel.style.display = 'none';
+			if (formEl) formEl.style.display = 'block';
+			setMode('signin');
+		});
+	}
+	// Forgot password: send reset link
+	if (forgotSendBtn) {
+		forgotSendBtn.addEventListener('click', async () => {
+			const email = (forgotEmailEl?.value || '').trim();
+			if (!email) { if (forgotStatusEl) forgotStatusEl.textContent = 'Please enter your email.'; return; }
+			// Disable button briefly to avoid spam-clicking
+			forgotSendBtn.disabled = true;
+			try {
+				// Compute environment-aware redirectTo (hosted vs local).
+				// Hosted (GitHub Pages): https://logandebo.github.io/GLS-App/reset_password.html
+				// Local dev: http://localhost:8080/reset_password.html
+				// Ensure both URLs are whitelisted in Supabase Auth → URL Configuration.
+				const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+				const redirectTo = isLocal
+					? 'http://localhost:8080/reset_password.html'
+					: 'https://logandebo.github.io/GLS-App/reset_password.html';
+				const { error } = await window.supabaseClient.resetPasswordForEmail(email, redirectTo);
+				if (error) {
+					if (forgotStatusEl) forgotStatusEl.textContent = `Request failed: ${error.message}`;
+				} else {
+					if (forgotStatusEl) forgotStatusEl.textContent = "If an account exists for that email, we've sent a password reset link.";
+				}
+			} catch (e) {
+				if (forgotStatusEl) forgotStatusEl.textContent = 'Network error. Please try again.';
+			} finally {
+				setTimeout(() => { forgotSendBtn.disabled = false; }, 6000);
+			}
+		});
+	}
 	if (signinBtn) {
 		signinBtn.addEventListener('click', async () => {
 			try {
