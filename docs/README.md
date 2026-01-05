@@ -2,6 +2,19 @@
 
 Browser-based MVP using vanilla HTML/CSS/JS. No backend.
 
+## Cloud Data Layer v1 (Supabase)
+The app now uses Supabase as the single source of truth for users, courses, lessons, concepts, and progress. Frontend reads/writes go through a Data Access Layer (DAL):
+- DAL: `js/dataStore.js` (one Supabase client from `js/auth/supabaseClient.js`)
+- Caching: localStorage acts as a SWR cache for public lists and by-ID maps
+- RLS: Owner-only writes, public reads for published content; per-user isolation for `profiles` and `user_progress`
+
+Deliverables:
+- `instructions/supabase_schema_v1.sql`: Tables, RLS ON, policies, indexes
+- `js/dataStore.js`: Profiles, Progress, Concepts, Lessons, Courses APIs + SWR helpers
+- Refactors: `courses`, `creator`, `subtree` now use DAL
+- Migration: `js/migration.js` migrates legacy localStorage to Supabase on first run
+- Viewer/Publish: Subtree deep-link hydration; publish ensures referenced content exists before marking public
+
 ## Structure
 See instruction file for authoritative spec.
 
@@ -11,6 +24,11 @@ Serve the root directory with any static server (needed for `fetch`). Example us
 python -m http.server 8000
 ```
 Then open: `http://localhost:8000/index.html`
+
+### Supabase Dev Notes
+- Set your Supabase URL and anon key in `js/auth/supabaseClient.js`.
+- Ensure RLS policies are applied (see `instructions/supabase_schema_v1.sql`).
+- No service role keys are used client-side.
 
 ## Unity Web MIDI Bridge (ScaleTrainerV2WebGL)
 Live MIDI → JS → Unity WebGL forwarding via Web MIDI API.
@@ -197,6 +215,19 @@ Lesson cards chips now reflect `type`, `minutes`, string `difficulty`, and `xpRe
 - Server-backed profiles / analytics
 - Creator tools & graph visualization (future Iteration 4 steps)
 
+## Testing Checklist (v1)
+- Authenticated: create concept/lesson/course → refresh → persists
+- Publish course → incognito can view course + referenced concepts/lessons
+- Progress persists across devices (complete a lesson, verify in another browser)
+- Unauthenticated: browse published courses; private drafts hidden
+- Security: user A cannot edit/delete user B content (RLS enforced)
+
+Quick Manual Steps:
+1. Sign in, create content via Creator, publish a course.
+2. Open Courses in incognito; verify your course appears.
+3. Complete a lesson; confirm progress renders in Subtree and Profile.
+4. Attempt to edit another user’s content (should be blocked).
+
 ## Development Notes
 - Storage keys (multi-user): `gep_users` (username → profile), `gep_activeUser` (active username). Legacy `userProfile` / `gep_profile` migrated automatically.
 - Storage keys (custom content): `gep_customConcepts` and `gep_customLessons`.
@@ -212,6 +243,13 @@ localStorage.setItem('gep_users', JSON.stringify(users));
 localStorage.removeItem('gep_activeUser');
 ```
 - Code style: vanilla modules, tabs indentation, minimal dependencies.
+
+## Deliverables Recap
+- Schema: `instructions/supabase_schema_v1.sql`
+- DAL: `js/dataStore.js`
+- Pages wired: `js/courses.js`, `js/creator.js`, `js/subtree.js`
+- Migration: `js/migration.js` + `js/pages/boot.js`
+- Player cloud fallback: `js/player.js` fetches missing lessons from Supabase
 
 ### Try It (Step 3)
 1. Start a static server and open `index.html`.

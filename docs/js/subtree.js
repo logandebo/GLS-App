@@ -1,6 +1,7 @@
 import { ensureActiveUserOrRedirect, getActiveUsername, getActiveProfile } from './storage.js';
 import { renderToast } from './ui.js';
-import { loadPublicCatalog, savePublicCatalog, getQueryParam, incrementMetric } from './catalogStore.js';
+import { loadPublicCatalog, savePublicCatalog, getQueryParam, incrementMetric, refreshPublicCatalogFromCloud } from './catalogStore.js';
+import { getCourseById, getUserProgress as dsGetUserProgress, getLessons as dsGetLessons, getConcepts as dsGetConcepts } from './dataStore.js';
 import { loadGraphStore, getAllNodes as gsGetAllNodes } from './graphStore.js';
 import { loadPublicConcepts } from './contentLoader.js';
 import { loadConceptProgress, computeMasteryTier } from './conceptProgress.js';
@@ -10,6 +11,8 @@ import { renderSubtreeGraph } from './subtreeGraphView.js';
 
 let _masterIndex = null;
 let _combinedIndex = null; // master + custom concepts
+let _cloudCompletedByConcept = new Map(); // conceptId -> Set(lessonId)
+let _cloudLessonsByConcept = new Map(); // conceptId -> Array(lesson)
 
 (function initHeader(){
   const usernameEl = document.getElementById('header-username');
@@ -24,6 +27,23 @@ let _combinedIndex = null; // master + custom concepts
   if (!ok) return;
   await loadGraphStore();
   await loadLessons();
+  // Fetch cloud user progress to render badges
+  try {
+    const { progress } = await dsGetUserProgress();
+    const byConcept = new Map();
+    (Array.isArray(progress) ? progress : []).forEach(r => {
+      if (r.entity_type === 'lesson' && (r.status || '').toLowerCase() === 'completed') {
+        const cid = (r.meta && r.meta.conceptId) || null;
+        if (cid) {
+          if (!byConcept.has(cid)) byConcept.set(cid, new Set());
+          byConcept.get(cid).add(r.entity_id);
+        }
+      }
+    });
+    _cloudCompletedByConcept = byConcept;
+  } catch {}
+  // Hydrate local public catalog cache from Supabase for deep links
+  try { await refreshPublicCatalogFromCloud(); } catch {}
   const nodes = gsGetAllNodes();
   _masterIndex = new Map(nodes.map(n => [n.id, n]));
   // Build combined index with custom concepts
@@ -36,8 +56,74 @@ let _combinedIndex = null; // master + custom concepts
   _combinedIndex = mergedById;
   const treeId = getQueryParam('treeId');
   if (!treeId) { showNotFound(); return; }
-  const catalog = loadPublicCatalog();
-  const tree = catalog.find(t => t.id === treeId);
+  let catalog = loadPublicCatalog();
+  let tree = catalog.find(t => t.id === treeId);
+  // Fallback: fetch directly from Supabase via DAL and normalize into local shape
+  if (!tree) {
+    try {
+      const { course } = await getCourseById(treeId);
+      if (course && course.tree_json) {
+        const row = course;
+        const t = row.tree_json || {};
+        const nodes = Array.isArray(t.nodes) ? t.nodes.map(n => ({
+          conceptId: n.conceptId,
+          nextIds: Array.isArray(n.nextIds) ? n.nextIds.slice() : [],
+          ...(Array.isArray(n.subtreeLessonIds) ? { subtreeLessonIds: n.subtreeLessonIds.slice() } : {}),
+          ...(n.subtreeLessonSteps && typeof n.subtreeLessonSteps === 'object' ? { subtreeLessonSteps: { ...n.subtreeLessonSteps } } : {}),
+          ...(n.ui ? { ui: { x: Number(n.ui.x)||0, y: Number(n.ui.y)||0 } } : {}),
+          unlockConditions: {
+            requiredConceptIds: Array.isArray(n.unlockConditions?.requiredConceptIds) ? n.unlockConditions.requiredConceptIds.slice() : [],
+            minBadge: n.unlockConditions?.minBadge || 'none',
+            ...(n.unlockConditions?.customRuleId ? { customRuleId: n.unlockConditions.customRuleId } : {})
+          }
+        })) : [];
+        tree = {
+          id: row.id,
+          title: t.title || row.title || 'Untitled Tree',
+          description: t.description || '',
+          creatorId: t.creatorId || 'unknown',
+          primaryDomain: t.primaryDomain || 'general',
+          tags: Array.isArray(t.tags) ? t.tags.slice() : [],
+          rootConceptId: t.rootConceptId || '',
+          introVideoUrl: t.introVideoUrl || '',
+          ui: { layoutMode: (t.ui && t.ui.layoutMode) ? String(t.ui.layoutMode) : 'top-down' },
+          nodes,
+          version: Number.isFinite(t.version) ? t.version : 1,
+          createdAt: t.createdAt || row.created_at || new Date().toISOString(),
+          updatedAt: t.updatedAt || row.created_at || new Date().toISOString()
+        };
+
+        // Batch-fetch referenced concepts and lessons via DAL
+        try {
+          const conceptIds = Array.from(new Set(nodes.map(n => n.conceptId).filter(Boolean)));
+          if (conceptIds.length) {
+            const { concepts } = await dsGetConcepts(conceptIds);
+            (Array.isArray(concepts) ? concepts : []).forEach(c => {
+              if (c && c.id && !_combinedIndex.has(c.id)) _combinedIndex.set(c.id, c);
+            });
+          }
+          const lessonIdsSet = new Set();
+          nodes.forEach(n => {
+            (Array.isArray(n.subtreeLessonIds) ? n.subtreeLessonIds : []).forEach(id => lessonIdsSet.add(id));
+            Object.keys(n.subtreeLessonSteps || {}).forEach(id => lessonIdsSet.add(id));
+          });
+          const lessonIds = Array.from(lessonIdsSet);
+          if (lessonIds.length) {
+            const { lessons } = await dsGetLessons(lessonIds);
+            // Group cloud lessons by conceptId for progress rendering
+            const byConcept = new Map();
+            (Array.isArray(lessons) ? lessons : []).forEach(ls => {
+              const cid = ls.concept_id || ls.conceptId || null;
+              if (!cid) return;
+              if (!byConcept.has(cid)) byConcept.set(cid, []);
+              byConcept.get(cid).push(ls);
+            });
+            _cloudLessonsByConcept = byConcept;
+          }
+        } catch {}
+      }
+    } catch {}
+  }
   if (!tree) { showNotFound(); return; }
   migrateTreeConceptIdsIfNeeded(tree, catalog);
   incrementMetric(tree.id, 'views', 1);
@@ -125,23 +211,30 @@ function renderGraph(tree){
 
   function nodeProgressPercent(conceptId){
     if (!conceptId || !profile) return 0;
-    const lessons = getLessonsForConcept(conceptId) || [];
+    const localLessons = getLessonsForConcept(conceptId) || [];
+    const cloudLessons = _cloudLessonsByConcept.get(conceptId) || [];
+    const lessons = [...localLessons, ...cloudLessons];
     const nonGame = lessons.filter(l => {
       const t = String(l?.type || '').toLowerCase();
+      const ct = String(l?.content_type || '').toLowerCase();
       return t !== 'unity_game' && t !== 'game';
     });
     const total = nonGame.length;
     if (total === 0) return 0;
-    const completedSet = new Set((profile?.conceptProgress?.[conceptId]?.completedLessonIds) || []);
-    const done = nonGame.filter(l => completedSet.has(l.id)).length;
+    const completedLocal = new Set((profile?.conceptProgress?.[conceptId]?.completedLessonIds) || []);
+    const completedCloud = _cloudCompletedByConcept.get(conceptId) || new Set();
+    const done = nonGame.filter(l => completedLocal.has(l.id) || completedCloud.has(l.id)).length;
     return Math.round((done / total) * 100);
   }
 
   function nodeIsEmpty(conceptId){
     if (!conceptId) return true;
-    const lessons = getLessonsForConcept(conceptId) || [];
+    const localLessons = getLessonsForConcept(conceptId) || [];
+    const cloudLessons = _cloudLessonsByConcept.get(conceptId) || [];
+    const lessons = [...localLessons, ...cloudLessons];
     const nonGame = lessons.filter(l => {
       const t = String(l?.type || '').toLowerCase();
+      const ct = String(l?.content_type || '').toLowerCase();
       return t !== 'unity_game' && t !== 'game';
     });
     return nonGame.length === 0;
@@ -220,8 +313,9 @@ function renderProgress(tree){
       return t !== 'unity_game' && t !== 'game';
     });
     totalNonGame += nonGame.length;
-    const completedSet = new Set((profile?.conceptProgress?.[cid]?.completedLessonIds) || []);
-    doneNonGame += nonGame.filter(l => completedSet.has(l.id)).length;
+    const completedLocal = new Set((profile?.conceptProgress?.[cid]?.completedLessonIds) || []);
+    const completedCloud = _cloudCompletedByConcept.get(cid) || new Set();
+    doneNonGame += nonGame.filter(l => completedLocal.has(l.id) || completedCloud.has(l.id)).length;
   });
   const percent = totalNonGame > 0 ? Math.round((doneNonGame / totalNonGame) * 100) : 0;
   el.textContent = `${percent}% completed`;

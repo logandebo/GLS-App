@@ -3,7 +3,8 @@ import { loadCustomConcepts, loadAllLessons, CUSTOM_LESSONS_KEY } from './conten
 import { migrateLegacyProfileIfNeeded, ensureActiveUserOrRedirect, getActiveProfile, createDefaultProfile, saveActiveProfile, getActiveUsername } from './storage.js';
 import { renderToast } from './ui.js';
 import { publishTree as publishToCatalog, unpublishTree as unpublishFromCatalog, getLastPublishMissingConceptIds } from './catalogStore.js';
-import { createCreatorTree as sbCreateCreatorTree, updateCreatorTree as sbUpdateCreatorTree, setCreatorTreePublished as sbSetCreatorTreePublished, fetchOwnCreatorTrees as sbFetchOwnCreatorTrees, deleteCreatorTree as sbDeleteCreatorTree, deleteCreatorTreeByLocalId as sbDeleteByLocalId, unpublishCreatorTreeByLocalId as sbUnpublishByLocalId } from './supabaseStore.js';
+import { getCoursesByUser as dsGetCoursesByUser, upsertCourse as dsUpsertCourse, deleteCourse as dsDeleteCourse, upsertConcept as dsUpsertConcept, upsertLesson as dsUpsertLesson } from './dataStore.js';
+import { deleteCreatorTreeByLocalId as sbDeleteByLocalId, unpublishCreatorTreeByLocalId as sbUnpublishByLocalId } from './supabaseStore.js';
 import { loadPublicConcepts, savePublicConcepts } from './contentLoader.js';
 import { loadCreatorTrees, createCreatorTree, getCreatorTree, addNodeToTree, connectNodes, updateCreatorTree, saveCreatorTrees, exportCreatorTree, importCreatorTree, validateCreatorTree, buildMasterIndex, updateUnlockConditions, deleteCreatorTree, setNodeNextIds } from './creatorTreeStore.js';
 import { renderSubtreeGraph } from './subtreeGraphView.js';
@@ -515,22 +516,58 @@ function publishCurrentTree(){
     if (Array.isArray(missing) && missing.length){
       renderToast(`Warning: ${missing.length} concepts referenced by this course were not found and may appear broken for learners.`, 'warning');
     }
-    // Attempt cloud publish to Supabase so courses are public to everyone
+    // Attempt cloud publish to Supabase (DAL courses) so courses are public to everyone
     (async () => {
       try {
+        // Snapshot current visual positions before publish
+        try {
+          if (_graphApi && typeof _graphApi.getNodePositions === 'function'){
+            const pos = _graphApi.getNodePositions();
+            tree.nodes.forEach(n => {
+              const p = pos.get(n.conceptId);
+              if (p && typeof p.x === 'number' && typeof p.y === 'number') n.ui = { x: Math.round(p.x), y: Math.round(p.y) };
+            });
+            updateCreatorTree(userId, tree.id, { nodes: tree.nodes });
+          }
+        } catch {}
+
+        // Pre-publish: upsert referenced concepts and lessons to Supabase (set public)
+        const conceptIds = Array.from(new Set((tree.nodes || []).map(n => n.conceptId).filter(Boolean)));
+        const lessonIds = new Set();
+        (tree.nodes || []).forEach(n => {
+          (Array.isArray(n.subtreeLessonIds) ? n.subtreeLessonIds : []).forEach(id => lessonIds.add(id));
+          Object.keys(n.subtreeLessonSteps || {}).forEach(id => lessonIds.add(id));
+        });
+        let conceptsSynced = 0, lessonsSynced = 0;
+        for (const cid of conceptIds) {
+          const c = (_titleIndex && _titleIndex.get(cid)) || _masterIndex.get(cid) || null;
+          if (c && c.id) {
+            const payload = { id: c.id, title: c.title || c.id, summary: c.shortDescription || c.longDescription || c.summary || '', domain: c.subject || c.primaryDomain || 'general', tags: Array.isArray(c.tags) ? c.tags : [], is_public: true };
+            const { error } = await dsUpsertConcept(payload);
+            if (!error) conceptsSynced++;
+          }
+        }
+        for (const lid of Array.from(lessonIds)) {
+          const l = _lessonById ? _lessonById.get(lid) : null;
+          if (l && l.id) {
+            const payload = { id: l.id, title: l.title || l.id, description: l.description || l.summary || '', content_type: l.type || l.contentType || 'article', content_url: (l.media && l.media.url) || l.videoUrl || '', payload: l.contentConfig || {}, is_public: true };
+            const { error } = await dsUpsertLesson(payload);
+            if (!error) lessonsSynced++;
+          }
+        }
+        if (conceptsSynced || lessonsSynced) {
+          renderToast(`Synced ${conceptsSynced} concepts, ${lessonsSynced} lessons to cloud`, 'info');
+        }
+
         // If this tree already has a Supabase row id, update it; else create then mark published
         const supabaseId = tree.supabaseId || null;
+        const stableSlug = tree.slug || tree.id;
         if (supabaseId) {
-          const { error: upErr } = await sbUpdateCreatorTree(supabaseId, { title: tree.title || 'Untitled', tree_json: tree, is_published: true });
+          const { error: upErr } = await dsUpsertCourse({ id: supabaseId, title: tree.title || 'Untitled', description: tree.description || '', slug: stableSlug, tree_json: tree, is_published: true });
           if (!upErr) { renderToast('Cloud course updated', 'info'); renderCloudPublishStatus(); }
         } else {
-          const { id, error: createErr } = await sbCreateCreatorTree(tree.title || 'Untitled', tree);
-          if (id && !createErr) {
-            const { error: pubErr } = await sbSetCreatorTreePublished(id, true);
-            // Save back supabase id to local tree for future updates
-            updateCreatorTree(userId, tree.id, { supabaseId: id });
-            if (!pubErr) { renderToast('Cloud course published', 'success'); renderCloudPublishStatus(); }
-          }
+          const { id, error: upErr } = await dsUpsertCourse({ id: tree.id, title: tree.title || 'Untitled', description: tree.description || '', slug: stableSlug, tree_json: tree, is_published: true });
+          if (id && !upErr) { updateCreatorTree(userId, tree.id, { supabaseId: id }); renderToast('Cloud course published', 'success'); renderCloudPublishStatus(); }
         }
       } catch {}
     })();
@@ -570,8 +607,8 @@ function unpublishCurrentTree(){
         // If supabaseId is missing, try to resolve by title or tree_json.id from owner trees
         if (!supabaseId) {
           try {
-            const { trees } = await sbFetchOwnCreatorTrees();
-            const match = (trees || []).find(r => {
+            const { courses } = await dsGetCoursesByUser();
+            const match = (courses || []).find(r => {
               const tj = r?.tree_json || {};
               return (r.title === (tree.title || '')) || (tj.id && tj.id === tree.id);
             });
@@ -582,7 +619,7 @@ function unpublishCurrentTree(){
           } catch {}
         }
         if (supabaseId) {
-          const { ok, error } = await sbDeleteCreatorTree(supabaseId);
+          const { ok, error } = await dsDeleteCourse(supabaseId);
           if (ok && !error) {
             updateCreatorTree(userId, tree.id, { supabaseId: null });
             renderToast('Cloud course removed', 'info');
@@ -590,7 +627,7 @@ function unpublishCurrentTree(){
           } else {
             console.warn('Cloud delete failed', error);
             // Fallback: mark as not published in cloud so it is no longer public
-            const { error: upErr } = await sbUpdateCreatorTree(supabaseId, { is_published: false });
+            const { error: upErr } = await dsUpsertCourse({ id: supabaseId, is_published: false });
             if (!upErr) {
               renderToast('Cloud course set to draft (unpublished)', 'info');
               renderCloudPublishStatus();
@@ -632,11 +669,11 @@ function renderCloudPublishStatus(){
       const userId = getActiveUsername();
       const tree = _currentTreeId ? getCreatorTree(userId, _currentTreeId) : null;
       if (!tree || !tree.supabaseId) { el.textContent = 'Cloud: Local only — not published'; return; }
-      // Verify published state from cloud for owner
+      // Verify published state from cloud for owner (DAL)
       (async () => {
         try {
-          const { trees } = await sbFetchOwnCreatorTrees();
-          const row = (trees || []).find(r => r.id === tree.supabaseId);
+          const { courses } = await dsGetCoursesByUser();
+          const row = (courses || []).find(r => r.id === tree.supabaseId);
           if (row && row.is_published) el.textContent = 'Cloud: Published';
           else el.textContent = 'Cloud: Draft — not public';
         } catch {

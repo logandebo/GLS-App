@@ -1,217 +1,267 @@
-# Copilot Instruction File — Implement “Forgot Password” (Supabase) for Luden
+# Copilot Instruction File — Move ALL App Data to Supabase (Users, Courses, Lessons, Concepts)
 
-Goal: Add a professional, secure “Forgot password” flow that emails the user a **reset link** and lets them set a **new password** (never reveals the old password). Use Supabase Auth (supabase-js v2 UMD) consistent with existing `supabaseClient.js` wrapper.
+Project: Luden (GLS / Learning Network)  
+Current state: Creator trees (courses) are being stored in Supabase, but other data (concepts, lessons, user progress/profile) still lives in local JSON / localStorage.  
+Goal: Upgrade to a Supabase-backed data layer so **all core data** is stored and loaded from Supabase:
+- User data (profile + progress)
+- Course data (creator trees / published trees)
+- Lesson data
+- Concept data
 
----
-
-## 0) High-level UX (what users experience)
-
-1. On the Login screen there is a **“Forgot password?”** link.
-2. User enters their email → clicks **Send reset link**.
-3. UI shows a professional neutral message like:
-   - “If an account exists for that email, we’ve sent a password reset link.”
-   (Do not confirm whether the email exists.)
-4. User clicks link in email → lands on a **Reset Password** page.
-5. They enter **New password** + **Confirm** → submit.
-6. Show success message → offer a button to go to Login.
+**Non-goals (v1):**
+- No server-side “admin panel” required.
+- No paid tiers, no advanced analytics yet.
+- Keep vanilla JS static-site architecture (GitHub Pages) and Supabase JS v2 UMD.
 
 ---
 
-## 1) Supabase dashboard configuration (required)
+## 0) Rules for implementation
 
-### 1.1 Set Site URL and Redirect URLs
-In Supabase: **Authentication → URL Configuration**
-- **Site URL:** set to your production site root (GitHub Pages URL), e.g.
-  - `https://<your-github-username>.github.io/<repo>/`
-- **Redirect URLs:** add *both* prod and local dev:
-  - `https://<your-github-username>.github.io/<repo>/reset_password.html`
-  - `http://localhost:8000/reset_password.html` (or whatever dev port you use)
-
-These must match the URL you pass as `redirectTo`.
-
-### 1.2 Email delivery quality (recommended)
-In Supabase: **Authentication → Email Templates**
-- Customize the “Reset password” template:
-  - Keep the reset link variable intact.
-  - Add your branding (“Luden”) and short instructions.
-
-Optional but recommended for “big company” feel:
-- Configure **Custom SMTP** (Supabase: Auth → SMTP) so emails come from your domain.
-  - Otherwise Supabase sends using its defaults (fine for v0.1).
+1. **Single source of truth:** Supabase is the source of truth. localStorage becomes a cache only.
+2. **RLS ON for all tables** storing user-specific or creator-owned content.
+3. **No account enumeration** (in any “find user” / reset flows).
+4. **Minimize breaking changes:** keep existing UI/UX; swap storage layer under it.
+5. **Backwards compatibility migration:** On first run after upgrade, migrate any legacy localStorage data into Supabase for that signed-in user.
+6. **Do not store secrets in repo:** Supabase anon key is acceptable if already used; do not add service keys.
 
 ---
 
-## 2) Files to add/edit
+## 1) Supabase schema design (v1)
 
-### 2.1 Add page: `docs/reset_password.html`
-Create a dedicated reset page. It should:
-- Detect a valid recovery session from the URL after Supabase redirect.
-- Prompt user for a new password (and confirm).
-- Call Supabase to update password.
-- Handle errors gracefully (expired link, weak password, etc.)
+Create these tables in Supabase (SQL Editor). Use UUID user IDs from `auth.users`.
 
-### 2.2 Edit page: `docs/auth.html`
-Add:
-- A “Forgot password?” link under the login form.
-- A “Forgot password panel/modal/section” with:
-  - Email input
-  - “Send reset link” button
-  - “Back to login” link
+### 1.1 `profiles`
+User profile + display settings.
 
-### 2.3 Add/Update script: `docs/js/auth_supabase.js` (or create `forgot_password.js`)
-Implement:
-- `requestPasswordReset(email)`
-- `handlePasswordRecoveryOnResetPage()`
-- `submitNewPassword(newPassword)`
+Columns:
+- `id uuid primary key references auth.users(id) on delete cascade`
+- `display_name text`
+- `avatar_url text`
+- `created_at timestamptz default now()`
+- `updated_at timestamptz default now()`
 
-Use the *existing* `window.supabaseClient` wrapper if present.
-If wrapper lacks needed methods, extend `supabaseClient.js`.
+RLS policies:
+- SELECT: user can select own profile
+- INSERT: user can insert own profile
+- UPDATE: user can update own profile
+
+### 1.2 `user_progress`
+User progress per concept/lesson/course.
+
+Columns:
+- `id bigserial primary key`
+- `user_id uuid references auth.users(id) on delete cascade`
+- `entity_type text check (entity_type in ('concept','lesson','course'))`
+- `entity_id text not null`
+- `status text` (e.g., 'unseen','seen','bronze','silver','gold','completed')
+- `xp int default 0`
+- `meta jsonb default '{}'::jsonb`
+- `updated_at timestamptz default now()`
+
+Constraints / Indexes:
+- unique `(user_id, entity_type, entity_id)`
+
+RLS:
+- SELECT/INSERT/UPDATE/DELETE: user can only access rows where `user_id = auth.uid()`.
+
+### 1.3 `concepts`
+All concept definitions, including creator custom concepts.
+
+Columns:
+- `id text primary key`
+- `created_by uuid references auth.users(id) on delete set null`
+- `title text not null`
+- `summary text`
+- `domain text`
+- `tags text[]`
+- `is_public boolean default false`
+- `created_at timestamptz default now()`
+- `updated_at timestamptz default now()`
+
+RLS:
+- SELECT: `(is_public = true) OR (created_by = auth.uid())`
+- INSERT/UPDATE/DELETE: `(created_by = auth.uid())`
+
+### 1.4 `lessons`
+Lesson metadata and content pointers.
+
+Columns:
+- `id text primary key`
+- `created_by uuid references auth.users(id) on delete set null`
+- `title text not null`
+- `description text`
+- `content_type text check (content_type in ('video','game','quiz','article','external'))`
+- `content_url text`
+- `payload jsonb default '{}'::jsonb`
+- `is_public boolean default false`
+- `created_at timestamptz default now()`
+- `updated_at timestamptz default now()`
+
+RLS:
+- SELECT: `(is_public = true) OR (created_by = auth.uid())`
+- INSERT/UPDATE/DELETE: `(created_by = auth.uid())`
+
+### 1.5 `courses`
+If you already have `creator_trees`, either rename it to `courses` or keep it but standardize behavior.
+
+Columns:
+- `id text primary key`
+- `created_by uuid references auth.users(id) on delete set null`
+- `title text not null`
+- `description text`
+- `slug text unique`
+- `is_published boolean default false`
+- `tree_json jsonb not null`
+- `created_at timestamptz default now()`
+- `updated_at timestamptz default now()`
+
+RLS:
+- SELECT: `(is_published = true) OR (created_by = auth.uid())`
+- INSERT/UPDATE/DELETE: `(created_by = auth.uid())`
 
 ---
 
-## 3) Implementation details (Supabase JS v2 UMD)
+## 2) Supabase SQL deliverable
 
-### 3.1 Request reset email
-Use:
-- `supabase.auth.resetPasswordForEmail(email, { redirectTo })`
+Copilot must output a single file: `supabase_schema_v1.sql` that includes:
+- CREATE TABLE statements
+- ENABLE RLS on all tables
+- CREATE POLICY statements
+- indexes + unique constraints
+
+Then I (Logan) will run that SQL in Supabase.
+
+---
+
+## 3) Front-end architecture upgrade
+
+### 3.1 Add a Data Access Layer (DAL)
+Create: `docs/js/dataStore.js`
+
+Functions to implement (minimum):
+- Profiles:
+  - `getProfile()`
+  - `upsertProfile({ display_name, avatar_url })`
+- Progress:
+  - `getUserProgress()`
+  - `upsertProgress({ entity_type, entity_id, status, xp, meta })`
+  - `bulkUpsertProgress(records)`
+- Concepts:
+  - `getConcept(id)`
+  - `getConcepts(ids[])`
+  - `upsertConcept(concept)`
+- Lessons:
+  - `getLesson(id)`
+  - `getLessons(ids[])`
+  - `upsertLesson(lesson)`
+- Courses:
+  - `getCourseById(id)`
+  - `getCourseBySlug(slug)`
+  - `getCoursesPublic()`
+  - `getCoursesByUser()`
+  - `upsertCourse(course)`
+  - `deleteCourse(id)` (owner-only)
 
 Requirements:
-- `redirectTo` must be one of the allowed redirect URLs in Supabase settings.
+- Use **one** Supabase client (from `supabaseClient.js`).
+- Add simple caching in localStorage (stale-while-revalidate):
+  - e.g., `cache:courses_public`, `cache:concepts`, `cache:lessons`
+- Always treat Supabase as the source of truth.
 
-Security UX:
-- Always show the same success message regardless of whether the email exists.
+### 3.2 Refactor existing code to call DAL
+Search and replace:
+- Any reads/writes to `localStorage` for core entities (concepts/lessons/courses/progress/profile)
+- Any loads from `graph.json` / `lessons.json` used as real data (keep only as optional fallback demos)
 
-### 3.2 Reset password page: handle recovery session
-Supabase sends users back with auth data in the URL (often in the hash `#`).
-On page load:
-1. Initialize Supabase client normally.
-2. Call `supabase.auth.getSession()` and/or listen to `supabase.auth.onAuthStateChange`.
-3. Supabase typically triggers `PASSWORD_RECOVERY` event or provides a session.
-4. If no valid recovery session exists:
-   - Show “This reset link is invalid or expired. Request a new one.”
-   - Provide a link back to `auth.html` with the forgot panel open.
-
-Implementation approach:
-- Register `onAuthStateChange((event, session) => { ... })`
-- If `event === 'PASSWORD_RECOVERY'` OR session exists and page is reset:
-  - show the new password form.
-
-### 3.3 Set the new password
-Use:
-- `supabase.auth.updateUser({ password: newPassword })`
-
-Then:
-- Show success state.
-- OPTIONAL: Immediately `signOut()` to force re-login with new password (recommended for clarity).
-  - Some apps keep the user signed in; either is acceptable, but “big company” feel is typically: reset → success → login.
+Update pages:
+- `courses.html` list should come from `getCoursesPublic()`
+- `creator.html` editor should use `getCoursesByUser()` and `upsertCourse()`
+- `subtree.html` viewer should use `getCourseById/Slug()` and then batch fetch referenced concepts/lessons
 
 ---
 
-## 4) Password policy (professional defaults)
+## 4) One-time migration (legacy localStorage → Supabase)
 
-Enforce client-side validation *before* calling update:
-- Minimum 8 characters (prefer 10–12).
-- Must include at least 1 letter and 1 number (optionally 1 symbol).
-- New password and confirm must match.
+On first load AFTER upgrade (user must be signed in):
+1. Detect legacy keys (examples; adjust to your actual names):
+   - `gep_userProfile`
+   - `gep_progress`
+   - `gep_customConcepts`
+   - `gep_customLessons`
+   - `gep_creatorTrees`
+2. For each present key, migrate:
+   - Profile → `profiles` (upsert)
+   - Progress → `user_progress` (bulk upsert)
+   - Custom concepts → `concepts` (created_by=auth.uid(), is_public=false)
+   - Custom lessons → `lessons` (created_by=auth.uid(), is_public=false)
+   - Draft courses → `courses` (is_published=false)
+3. Set `localStorage.setItem('migration:v1:done','1')` after success.
+4. Do not rerun if flag exists.
 
-Also display server-side errors verbatim (sanitized) when Supabase rejects:
-- e.g., “Password should be at least 6 characters” depending on project settings.
-
-Do NOT implement “security questions”.
-Do NOT ever show existing passwords.
-
----
-
-## 5) UI requirements (professional)
-
-### 5.1 Forgot password panel
-- Title: “Reset your password”
-- Copy: “Enter your email and we’ll send you a reset link.”
-- Button: “Send reset link”
-- After submission:
-  - show neutral success message
-  - disable the button for ~5–10 seconds to prevent spam-clicking
-  - show small “Didn’t get it? Check spam or try again.”
-
-### 5.2 Reset password page
-- Title: “Create a new password”
-- Fields:
-  - New password
-  - Confirm new password
-- Provide show/hide password toggle
-- Provide inline validation messages
-- Provide success state with button: “Back to login”
+Add a toast: “Migration completed.”
 
 ---
 
-## 6) Concrete tasks for Copilot (step-by-step)
+## 5) Publish flow requirements (critical)
 
-### Task A — Update `supabaseClient.js` wrapper (if needed)
-Check if wrapper already exposes these. If not, add:
-- `resetPasswordForEmail(email, redirectTo)`
-- `updatePassword(newPassword)` (calls `supabase.auth.updateUser`)
-- Ensure `storageKey` is consistent and no “session resurrection” regression.
-
-### Task B — Implement forgot password UI in `auth.html`
-- Add link/button under login form.
-- Add a “forgot password view” (either separate section or modal).
-- Wire events in `auth_supabase.js`.
-
-### Task C — Create `reset_password.html`
-- Include the Supabase UMD script(s) same as other pages.
-- Include `supabaseClient.js`.
-- Include a new `reset_password.js` (or extend `auth_supabase.js`).
-- Implement:
-  - `initResetPasswordPage()` on DOMContentLoaded
-  - It should:
-    - wait for session hydration
-    - detect PASSWORD_RECOVERY/session
-    - render correct UI state
-
-### Task D — Add robust error handling
-Handle:
-- Missing/expired link
-- Weak password
-- Network errors
-- User closes tab mid-flow
-
-### Task E — Verify end-to-end
-Checklist:
-1. Login page shows “Forgot password?” and opens panel.
-2. Enter email → neutral success message.
-3. Email arrives with link.
-4. Link opens reset page.
-5. Set new password successfully.
-6. User can log in with new password; old password fails.
-7. Refresh/reset page after success does not break auth state.
+When publishing a course:
+1. Ensure `tree_json` includes nodes + edges + positions.
+2. Extract referenced concept IDs and lesson IDs from `tree_json`.
+3. Upsert any missing referenced concepts/lessons to Supabase BEFORE marking course published.
+4. Set:
+   - `is_published = true`
+   - Ensure `slug` exists and is stable
 
 ---
 
-## 7) Suggested code structure (simple + maintainable)
+## 6) Viewer flow requirements (critical)
 
-- `docs/auth.html`
-- `docs/reset_password.html`
-- `docs/js/supabaseClient.js`
-- `docs/js/auth_supabase.js`
-- `docs/js/reset_password.js` (new)
+In `subtree.html`:
+1. Fetch course by id or slug from Supabase.
+2. Extract needed concept IDs + lesson IDs.
+3. Batch fetch those via DAL (`getConcepts`, `getLessons`).
+4. Render.
+5. If anything missing:
+   - show placeholders
+   - show message: “This course needs republishing.”
 
-Avoid duplicating client initialization.
-Ensure all pages import the same `supabaseClient.js`.
-
----
-
-## 8) Notes on Supabase Auth settings you may need to tweak
-- If you want stronger password rules, check Supabase Auth settings for password strength (if available in your plan/version).
-- If emails aren’t arriving reliably, set up SMTP.
-- If redirect fails, it’s almost always because Redirect URLs aren’t whitelisted.
+Also ensure deep-linking works with no prerequisite page visits.
 
 ---
 
-## 9) Deliverables Copilot must produce
-1. Working forgot-password UI on `auth.html`
-2. Working `reset_password.html` page
-3. Minimal changes to existing auth logic (no regressions)
-4. Clear comments explaining where to update URLs for prod/dev
-5. Short test instructions at the bottom of the PR/summary
+## 7) User progress requirements
+
+Whenever user completes a lesson / node quiz:
+- write progress via DAL:
+  - `entity_type` + `entity_id`
+  - status + xp + meta
+
+Render UI badges using progress map from `getUserProgress()`.
+
+---
+
+## 8) Testing checklist (must pass)
+
+Authenticated:
+- Create concept/lesson/course → refresh → persists
+- Publish course → incognito can view course + concepts/lessons
+- Progress persists across devices
+
+Unauthenticated:
+- Can browse published courses
+- Cannot see private drafts
+
+Security:
+- User A cannot edit/delete User B content (RLS enforced)
+
+---
+
+## 9) Deliverables Copilot must output
+
+1. `supabase_schema_v1.sql`
+2. `docs/js/dataStore.js`
+3. Refactors to use DAL as source of truth
+4. One-time migration logic
+5. Updated publish + viewer logic ensuring referenced content exists
 
 End.

@@ -4,6 +4,7 @@ import { getOrCreateDefaultProfile, markLessonCompleted, computeTotalXpFromCompl
 import { renderToast } from './ui.js';
 import { migrateLegacyProfileIfNeeded, ensureActiveUserOrRedirect, getActiveProfile, createDefaultProfile, saveActiveProfile, getActiveUsername } from './storage.js';
 import { runLesson } from './lessonRunner.js';
+import { upsertProgress as dsUpsertProgress, getLesson as dsGetLesson } from './dataStore.js';
 import { recordSession, getConceptMastery } from './conceptProgress.js';
 import { loadUserPreferences } from './preferences.js';
 import { loadPlaylists, createPlaylist, addLesson as addLessonToPlaylist } from './playlists.js';
@@ -41,7 +42,15 @@ import { loadPublicCatalog } from './catalogStore.js';
 			if (container) container.textContent = 'No lesson specified.';
 			return;
 		}
-		const lesson = getLessonById(lessonId);
+		let lesson = getLessonById(lessonId);
+		if (!lesson) {
+			try {
+				const { lesson: cloud } = await dsGetLesson(lessonId);
+				if (cloud) {
+					lesson = normalizeCloudLesson(cloud);
+				}
+			} catch {}
+		}
 		if (!lesson) {
 			renderToast('Lesson not found', 'error');
 			if (container) container.textContent = 'Lesson not found.';
@@ -101,6 +110,36 @@ import { loadPublicCatalog } from './catalogStore.js';
 	}
 })();
 
+function normalizeCloudLesson(row) {
+	const typeMap = { video: 'video', game: 'unity_game', quiz: 'quiz', article: 'video', external: 'external_link' };
+	const type = typeMap[String(row.content_type || 'video').toLowerCase()] || 'video';
+	const payload = row.payload || {};
+	let contentConfig = { video: undefined, unity_game: undefined, quiz: undefined, external_link: undefined };
+	if (type === 'video') {
+		contentConfig.video = { url: row.content_url || payload?.video?.url || '' };
+	} else if (type === 'unity_game') {
+		contentConfig.unity_game = { url: row.content_url || payload?.unity_game?.url || '' };
+	} else if (type === 'quiz') {
+		contentConfig.quiz = payload?.quiz || { shuffleQuestions: true, questions: [] };
+	} else if (type === 'external_link') {
+		const links = (payload?.external_link?.links && Array.isArray(payload.external_link.links)) ? payload.external_link.links : [];
+		const previewVideoUrl = payload?.external_link?.previewVideoUrl || '';
+		contentConfig.external_link = { links, previewVideoUrl };
+	}
+	return {
+		id: row.id,
+		conceptId: row.concept_id || row.conceptId || null,
+		title: row.title || row.id,
+		description: row.description || '',
+		type,
+		minutes: 0,
+		difficulty: 'beginner',
+		contentConfig,
+		xpReward: 0,
+		isCustom: true
+	};
+}
+
 function setupMeta(lesson, concept) {
 	const titleEl = document.getElementById('lessonTitle');
 	titleEl.textContent = lesson.title;
@@ -139,6 +178,17 @@ function completeLesson(profile, lesson, concept, sessionInfo = {}) {
 	try { panel.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
 	document.getElementById('xpAwardText').textContent = `You earned ${lesson.xpReward} XP!`;
 	// Mastery impact + next recommendation
+	try {
+		// Write cloud progress row (Supabase) if available
+		if (window.supabaseClient && window.supabaseClient.isConfigured()) {
+			const url = new URL(window.location.href);
+			const treeId = url.searchParams.get('treeId') || null;
+			const meta = { conceptId: concept.id, treeId, minutes: Number(sessionInfo.minutes || lesson.minutes || 0) || 0, score: typeof sessionInfo.score === 'number' ? sessionInfo.score : null };
+			dsUpsertProgress({ entity_type: 'lesson', entity_id: lesson.id, status: 'completed', xp: Number(lesson.xpReward)||0, meta }).catch(()=>{});
+			// Optionally mark concept seen/progressed
+			dsUpsertProgress({ entity_type: 'concept', entity_id: concept.id, status: 'seen', xp: 0, meta: { treeId } }).catch(()=>{});
+		}
+	} catch {}
 	try {
 		const userId = getActiveUsername();
 		const mastery = getConceptMastery(userId, concept.id);

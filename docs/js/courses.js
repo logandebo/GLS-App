@@ -1,10 +1,11 @@
 import { getActiveProfile } from './storage.js?v=20260103';
 import { subscribe, getState } from './auth/authStore.js?v=20260103';
 import { renderToast } from './ui.js';
-import { loadPublicCatalog, loadTreeMetrics, refreshPublicCatalogFromCloud } from './catalogStore.js';
+import { loadTreeMetrics } from './catalogStore.js';
 import { loadGraphStore, getAllNodes as gsGetAllNodes } from './graphStore.js';
 import { loadAllLessons } from './contentLoader.js';
 import { loadUserTreeProgress } from './userTreeProgress.js';
+import { getCoursesPublic, swrGetCoursesPublic } from './dataStore.js';
 
 export async function initCourses(){
   // Courses page is browsable for guests; do not redirect.
@@ -14,24 +15,33 @@ export async function initCourses(){
   // Load master graph for duration estimates
   await loadGraphStore();
   _masterIndex = new Map(gsGetAllNodes().map(n => [n.id, n]));
+  await hydrateCatalog();
   initFilters();
   renderCatalog();
-  // Refresh catalog from cloud in background, then re-render
-  try {
-    const ok = await refreshPublicCatalogFromCloud();
-    if (ok) {
-      renderCatalog();
-    }
-  } catch {}
   // Optionally load lessons to enhance cards with counts and progress
   try {
     _allLessons = await loadAllLessons();
     renderCatalog();
   } catch(e){ console.warn('Optional lessons load failed; continuing without counts', e); }
-  // Live update on publish/unpublish via storage
+  // Live update when SWR cache or metrics change
   window.addEventListener('storage', (e) => {
-    if (e.key === 'gep_publicCreatorTrees' || e.key === 'gep_treeMetrics') renderCatalog();
+    if (e.key === 'cache:courses_public' || e.key === 'gep_treeMetrics') {
+      swrGetCoursesPublic().then(list => { _catalog = Array.isArray(list) ? list : []; renderCatalog(); }).catch(() => {});
+    }
   });
+}
+
+let _catalog = [];
+
+async function hydrateCatalog(){
+  try {
+    const immediate = await swrGetCoursesPublic();
+    _catalog = Array.isArray(immediate) ? immediate : [];
+    // Background revalidation from Supabase
+    getCoursesPublic().then(({ courses, error }) => {
+      if (!error && Array.isArray(courses)) { _catalog = courses; renderCatalog(); }
+    }).catch(() => {});
+  } catch {}
 }
 
 function initFilters(){
@@ -39,7 +49,7 @@ function initFilters(){
   const tagSel = document.getElementById('tagFilter');
   const searchInput = document.getElementById('searchInput');
   const sortSelect = document.getElementById('sortSelect');
-  const catalog = loadPublicCatalog();
+  const catalog = Array.isArray(_catalog) ? _catalog : [];
   const domains = Array.from(new Set(catalog.map(c => c.primaryDomain).filter(Boolean))).sort();
   const tags = Array.from(new Set(catalog.flatMap(c => Array.isArray(c.tags) ? c.tags : []).filter(Boolean))).sort();
   domainSel.innerHTML = '';
@@ -75,7 +85,7 @@ function renderCatalog(){
   const domainFilter = document.getElementById('domainFilter').value || '';
   const tagFilter = document.getElementById('tagFilter').value || '';
   const sort = document.getElementById('sortSelect').value || 'views_desc';
-  const catalog = loadPublicCatalog();
+  const catalog = Array.isArray(_catalog) ? _catalog.slice() : [];
   const metrics = loadTreeMetrics();
   let items = catalog.slice();
   if (searchTerm) {
