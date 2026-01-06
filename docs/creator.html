@@ -69,6 +69,8 @@
         <button id="publishTreeBtn" class="btn" type="button" title="Publish to Courses (Cloud): Requires Supabase configured (see js/config.js), signed-in user, and Supabase table 'creator_trees' with public read policy. On success, the course is uploaded and marked public.">Publish</button>
         <button id="publishHelpBtn" class="btn subtle small" type="button" title="How to publish to cloud:\n1) Configure SUPABASE_URL and SUPABASE_ANON_KEY (js/config.js).\n2) Ensure the Supabase UMD script loads (already included on this page).\n3) Sign in (Login/Sign Up in header).\n4) In Supabase, create table 'creator_trees' with RLS: public can select when is_published=true; owners can insert/update/delete their rows.\n5) Click Publish; you should see 'Cloud course published' and the status banner change to 'Cloud: Published'.">?</button>
         <button id="unpublishTreeBtn" class="btn secondary" type="button" title="Remove from Courses">Unpublish</button>
+        <span class="short" style="margin-left:0.5rem;">Slug: <strong id="slugDisplay" class="muted">(none)</strong></span>
+        <button id="slugRegenBtn" class="btn subtle small" type="button" title="Generate a new unique slug for this course. This updates local state; publish to apply on cloud.">Regenerate</button>
         <label style="display:flex; gap:0.4rem; align-items:center;">
           <span>Mode:</span>
           <select id="editorMode" class="input" style="min-width:160px;">

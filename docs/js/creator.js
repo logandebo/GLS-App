@@ -4,6 +4,7 @@ import { migrateLegacyProfileIfNeeded, ensureActiveUserOrRedirect, getActiveProf
 import { renderToast } from './ui.js';
 import { publishTree as publishToCatalog, unpublishTree as unpublishFromCatalog, getLastPublishMissingConceptIds } from './catalogStore.js';
 import { getCoursesByUser as dsGetCoursesByUser, upsertCourse as dsUpsertCourse, deleteCourse as dsDeleteCourse, upsertConcept as dsUpsertConcept, upsertLesson as dsUpsertLesson } from './dataStore.js';
+import { generateCourseSlug, slugifyTitle, randomSuffix } from './utils/slug.js';
 import { deleteCreatorTreeByLocalId as sbDeleteByLocalId, unpublishCreatorTreeByLocalId as sbUnpublishByLocalId } from './supabaseStore.js';
 import { loadPublicConcepts, savePublicConcepts } from './contentLoader.js';
 import { loadCreatorTrees, createCreatorTree, getCreatorTree, addNodeToTree, connectNodes, updateCreatorTree, saveCreatorTrees, exportCreatorTree, importCreatorTree, validateCreatorTree, buildMasterIndex, updateUnlockConditions, deleteCreatorTree, setNodeNextIds } from './creatorTreeStore.js';
@@ -92,6 +93,7 @@ function initControls(){
   const importInput = document.getElementById('importTreeInput');
   const deleteBtn = document.getElementById('deleteTreeBtn');
   const publishBtn = document.getElementById('publishTreeBtn');
+  const slugRegenBtn = document.getElementById('slugRegenBtn');
   const publishHelpBtn = document.getElementById('publishHelpBtn');
   const unpublishBtn = document.getElementById('unpublishTreeBtn');
   const editorMode = document.getElementById('editorMode');
@@ -112,6 +114,17 @@ function initControls(){
   importInput.addEventListener('change', handleImportTree);
   deleteBtn && deleteBtn.addEventListener('click', deleteCurrentTree);
   publishBtn.addEventListener('click', publishCurrentTree);
+  slugRegenBtn && slugRegenBtn.addEventListener('click', () => {
+    const userId2 = getActiveUsername();
+    if (!userId2 || !_currentTreeId) return;
+    const tree = getCreatorTree(userId2, _currentTreeId);
+    if (!tree) return;
+    tree.slug = generateCourseSlug(tree.title || 'course');
+    updateCreatorTree(userId2, tree.id, { slug: tree.slug });
+    const el = document.getElementById('slugDisplay');
+    if (el) el.textContent = tree.slug;
+    renderToast('Slug regenerated. Publish to apply.', 'info');
+  });
   publishHelpBtn && publishHelpBtn.addEventListener('click', showPublishHelp);
   unpublishBtn.addEventListener('click', unpublishCurrentTree);
   treeSelect.addEventListener('change', () => loadSelectedTree(treeSelect.value));
@@ -204,6 +217,11 @@ function loadSelectedTree(treeId){
   const userId = getActiveUsername();
   const tree = getCreatorTree(userId, treeId);
   if (!tree) return;
+  // Legacy slug backfill: ensure slug exists once and persist
+  if (!tree.slug) {
+    tree.slug = generateCourseSlug(tree.title || 'course');
+    updateCreatorTree(userId, tree.id, { slug: tree.slug });
+  }
   migratePrivateTreeIfNeeded(userId, tree);
   _currentTreeId = tree.id;
   document.getElementById('treeTitle').value = tree.title || '';
@@ -220,6 +238,8 @@ function loadSelectedTree(treeId){
   refreshVisualEditor();
   renderIntroVideoPreview();
   renderCloudPublishStatus();
+  // Update slug display in UI
+  try { const el = document.getElementById('slugDisplay'); if (el) el.textContent = tree.slug || '(none)'; } catch {}
 }
 
 function migratePrivateTreeIfNeeded(userId, tree){
@@ -580,37 +600,46 @@ function publishCurrentTree(){
           renderToast(`Synced ${conceptsSynced} concepts, ${lessonsSynced} lessons to cloud`, 'info');
         }
 
-        // If this tree already has a Supabase row id, update it; else create then mark published
+        // Ensure slug exists
+        if (!tree.slug) { tree.slug = generateCourseSlug(tree.title || 'course'); updateCreatorTree(userId, tree.id, { slug: tree.slug }); }
         const supabaseId = tree.supabaseId || null;
-        const stableSlug = tree.slug || tree.id;
-        if (supabaseId) {
-          const { error: upErr } = await dsUpsertCourse({ id: supabaseId, title: tree.title || 'Untitled', description: tree.description || '', slug: stableSlug, tree_json: tree, is_published: true });
-          if (!upErr) { renderToast('Cloud course updated', 'info'); renderCloudPublishStatus(); }
-          else { renderToast('Cloud publish failed (update). Check slug/id conflicts.', 'error'); }
-        } else {
-          // Try multiple slug candidates to avoid unique conflicts
-          const baseSlug = String(stableSlug || '').trim() || tree.id;
-          const suffixA = (tree.id || '').slice(-6).toLowerCase();
-          const candidates = Array.from(new Set([
-            baseSlug,
-            tree.id,
-            `${slugifyId(baseSlug)}-${suffixA}`
-          ])).filter(Boolean);
-          let published = false, lastErr = null, chosenSlug = null, newId = null;
-          for (const cand of candidates) {
-            const { id, error: tryErr } = await dsUpsertCourse({ id: tree.id, title: tree.title || 'Untitled', description: tree.description || '', slug: cand, tree_json: tree, is_published: true });
-            if (!tryErr && id) { published = true; newId = id; chosenSlug = cand; break; }
-            lastErr = tryErr;
+        const baseTitle = tree.title || 'Untitled';
+        const isUniqueViolation = (err) => !!(err && (err.code === '23505' || /duplicate key/i.test(err.message || '') || /slug/i.test(err.message || '')));
+
+        async function publishCourseWithRetry(maxRetries = 5) {
+          const payloadBase = { id: tree.id, title: baseTitle, description: tree.description || '', tree_json: tree, is_published: true };
+          if (supabaseId) {
+            const { error } = await dsUpsertCourse({ ...payloadBase, id: supabaseId, slug: tree.slug });
+            if (!error) { updateCreatorTree(userId, tree.id, { supabaseId }); return { ok: true, id: supabaseId }; }
+            if (!isUniqueViolation(error)) return { ok: false, error };
           }
-          if (published && newId) {
-            updateCreatorTree(userId, tree.id, { supabaseId: newId, slug: chosenSlug });
-            renderToast(`Cloud course published (slug: ${chosenSlug})`, 'success');
-            renderCloudPublishStatus();
-          } else {
-            renderToast('Cloud publish failed (insert). Slug conflict unresolved.', 'error');
-            if (lastErr && lastErr.message) console.warn('[PUBLISH-DIAG] Insert failed:', lastErr.message);
+          // Insert path with slug regeneration on unique violation
+          let attempts = 0, lastErr = null, newId = null;
+          while (attempts < maxRetries) {
+            attempts++;
+            const { id, error } = await dsUpsertCourse({ ...payloadBase, slug: tree.slug });
+            if (!error && id) { newId = id; break; }
+            lastErr = error;
+            if (isUniqueViolation(error)) {
+              const clean = slugifyTitle(baseTitle);
+              tree.slug = `${clean}-${randomSuffix(12)}`;
+              updateCreatorTree(userId, tree.id, { slug: tree.slug });
+              try { const el = document.getElementById('slugDisplay'); if (el) el.textContent = tree.slug; } catch {}
+              continue;
+            } else {
+              break;
+            }
           }
+          if (newId) {
+            updateCreatorTree(userId, tree.id, { supabaseId: newId });
+            return { ok: true, id: newId };
+          }
+          return { ok: false, error: lastErr };
         }
+
+        const res = await publishCourseWithRetry(5);
+        if (res.ok) { renderToast(`Cloud course published (slug: ${tree.slug})`, 'success'); renderCloudPublishStatus(); }
+        else { renderToast('Cloud publish failed (insert). Slug conflict unresolved.', 'error'); if (res.error) console.warn('[PUBLISH-DIAG]', res.error); }
       } catch {}
     })();
   } catch(err){ renderToast('Publish failed', 'error'); }

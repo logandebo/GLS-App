@@ -22,6 +22,8 @@
 // }
 // Stored per user under localStorage key: gep_creatorTrees_<userId>
 
+import { generateCourseSlug } from './utils/slug.js';
+
 const DEFAULT_MIN_BADGE = 'none';
 
 function storageKey(userId) {
@@ -50,21 +52,11 @@ function generateTreeId() {
   return 'tree_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
-function generateSlug(baseTitle, id) {
-  const base = String(baseTitle || '').trim().toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$|\s+/g, '');
-  const suffix = String(id || '').split('_').pop()?.slice(-6) || Math.random().toString(36).slice(2, 8);
-  const safe = base || 'course';
-  return `${safe}-${suffix}`;
-}
-
 export function createCreatorTree(userId, meta) {
   const trees = loadCreatorTrees(userId);
   const tree = {
     id: generateTreeId(),
-    slug: generateSlug(meta?.title, undefined),
+    slug: generateCourseSlug(meta?.title || 'course'),
     title: (meta?.title || 'Untitled Tree').trim(),
     description: meta?.description || '',
     creatorId: userId,
@@ -74,8 +66,8 @@ export function createCreatorTree(userId, meta) {
     ui: { layoutMode: 'top-down' },
     nodes: []
   };
-  // Ensure slug includes the new id-derived suffix for stronger uniqueness
-  tree.slug = generateSlug(tree.title, tree.id);
+  // Ensure slug is set; keep stable unless user regenerates
+  if (!tree.slug) tree.slug = generateCourseSlug(tree.title || 'course');
   trees.push(tree);
   saveCreatorTrees(userId, trees);
   return tree;
@@ -227,7 +219,7 @@ export function importCreatorTree(userId, data, masterById) {
   if (!data || typeof data !== 'object') throw new Error('Invalid tree data');
   const tree = {
     id: generateTreeId(),
-    slug: generateSlug(data.title, undefined),
+    slug: generateCourseSlug(data.title || 'course'),
     title: (data.title || 'Imported Tree').trim(),
     description: data.description || '',
     creatorId: userId,
@@ -244,7 +236,7 @@ export function importCreatorTree(userId, data, masterById) {
       }
     })) : []
   };
-  tree.slug = generateSlug(tree.title, tree.id);
+  if (!tree.slug) tree.slug = generateCourseSlug(tree.title || 'course');
   if (masterById) {
     const result = validateCreatorTree(tree, masterById);
     if (!result.ok) throw new Error('Tree validation failed: ' + result.errors.join('; '));
