@@ -311,10 +311,10 @@ export async function getCoursesByUser() {
   if (!c) return { courses: [], error: new Error('Supabase not configured') };
   const { user } = await getAuthUser();
   if (!user) return { courses: [], error: new Error('No auth user') };
-  // Try owner_id filter first; if schema uses created_by, fallback
-  let { data, error } = await c.from(tableNameCourses()).select('*').eq('owner_id', user.id);
-  if (error && hasColumnError(error, 'owner_id', tableNameCourses())) {
-    const res = await c.from(tableNameCourses()).select('*').eq('created_by', user.id);
+  // Try created_by filter first; if schema uses owner_id, fallback
+  let { data, error } = await c.from(tableNameCourses()).select('*').eq('created_by', user.id);
+  if (error && hasColumnError(error, 'created_by', tableNameCourses())) {
+    const res = await c.from(tableNameCourses()).select('*').eq('owner_id', user.id);
     data = res.data; error = res.error;
   }
   if (error || !Array.isArray(data)) {
@@ -339,10 +339,10 @@ export async function upsertCourse(course = {}) {
     updated_at: nowIso(),
   };
   const options = isUuid(course.id) ? { onConflict: 'id' } : {};
-  // Attempt owner_id; if column missing, retry with created_by
-  let { data, error } = await upsert(tableNameCourses(), { ...base, owner_id: user.id }, options);
-  if (error && hasColumnError(error, 'owner_id', tableNameCourses())) {
-    const res = await upsert(tableNameCourses(), { ...base, created_by: user.id }, options);
+  // Attempt created_by; if column missing, retry with owner_id
+  let { data, error } = await upsert(tableNameCourses(), { ...base, created_by: user.id }, options);
+  if (error && hasColumnError(error, 'created_by', tableNameCourses())) {
+    const res = await upsert(tableNameCourses(), { ...base, owner_id: user.id }, options);
     data = res.data; error = res.error;
   }
   if (error) {
@@ -372,9 +372,9 @@ export async function deleteCourse(id) {
   const { user } = await getAuthUser();
   if (!user) return { ok: false, error: new Error('No auth user') };
   // Prefer new table; restrict by owner
-  let { data, error } = await removeWhere(tableNameCourses(), { id, owner_id: user.id });
-  if (error && hasColumnError(error, 'owner_id', tableNameCourses())) {
-    const res = await removeWhere(tableNameCourses(), { id, created_by: user.id });
+  let { data, error } = await removeWhere(tableNameCourses(), { id, created_by: user.id });
+  if (error && hasColumnError(error, 'created_by', tableNameCourses())) {
+    const res = await removeWhere(tableNameCourses(), { id, owner_id: user.id });
     data = res.data; error = res.error;
   }
   if (error) {
