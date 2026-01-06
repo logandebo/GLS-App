@@ -316,7 +316,25 @@ export async function upsertCourse(course = {}) {
     tree_json: course.tree_json || course.tree || {},
     updated_at: nowIso(),
   };
-  const { data, error } = await upsert(tableNameCourses(), payload, { onConflict: 'id' });
+  let { data, error } = await upsert(tableNameCourses(), payload, { onConflict: 'id' });
+  if (error) {
+    const msg = String(error.message || '').toLowerCase();
+    const code = String(error.code || '');
+    // Fallback to legacy table if 'courses' is missing or permission denied
+    if (code === '42P01' || /relation .*courses.* does not exist/.test(msg) || /permission denied.*courses/.test(msg)) {
+      const legacyPayload = {
+        id: course.id,
+        owner_id: user.id,
+        title: course.title || 'Untitled',
+        description: course.description || '',
+        is_published: !!course.is_published,
+        tree_json: course.tree_json || course.tree || {},
+        updated_at: nowIso(),
+      };
+      const { data: legacyData, error: legacyErr } = await upsert(tableNameLegacyTrees(), legacyPayload, { onConflict: 'id' });
+      return { id: Array.isArray(legacyData) && legacyData[0] ? legacyData[0].id : legacyPayload.id || null, error: legacyErr };
+    }
+  }
   return { id: Array.isArray(data) && data[0] ? data[0].id : payload.id || null, error };
 }
 
