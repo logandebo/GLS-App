@@ -1,267 +1,169 @@
-# Copilot Instruction File — Move ALL App Data to Supabase (Users, Courses, Lessons, Concepts)
+# Copilot Instruction File — Fix “Cloud publish failed (insert). Slug conflict unresolved.”
 
-Project: Luden (GLS / Learning Network)  
-Current state: Creator trees (courses) are being stored in Supabase, but other data (concepts, lessons, user progress/profile) still lives in local JSON / localStorage.  
-Goal: Upgrade to a Supabase-backed data layer so **all core data** is stored and loaded from Supabase:
-- User data (profile + progress)
-- Course data (creator trees / published trees)
-- Lesson data
-- Concept data
+## Problem
+Publishing a course to Supabase fails with:
+> “Cloud publish failed (insert). Slug conflict unresolved.”
 
-**Non-goals (v1):**
-- No server-side “admin panel” required.
-- No paid tiers, no advanced analytics yet.
-- Keep vanilla JS static-site architecture (GitHub Pages) and Supabase JS v2 UMD.
+Root cause:
+- `courses.slug` is **globally unique**.
+- Another course (possibly another user’s private draft) already has that slug.
+- Because of RLS, the client **cannot reliably pre-check** slug availability.
+So we must handle conflicts by **generating slugs that are effectively collision-proof** and **retrying on unique violations**.
 
 ---
 
-## 0) Rules for implementation
-
-1. **Single source of truth:** Supabase is the source of truth. localStorage becomes a cache only.
-2. **RLS ON for all tables** storing user-specific or creator-owned content.
-3. **No account enumeration** (in any “find user” / reset flows).
-4. **Minimize breaking changes:** keep existing UI/UX; swap storage layer under it.
-5. **Backwards compatibility migration:** On first run after upgrade, migrate any legacy localStorage data into Supabase for that signed-in user.
-6. **Do not store secrets in repo:** Supabase anon key is acceptable if already used; do not add service keys.
+## Success criteria
+1. Publishing must succeed even when the initial slug collides.
+2. Slugs should be stable once published (do not change on every publish unless forced).
+3. Collision probability must be near-zero by design.
+4. When a conflict happens, the UI should show a helpful message and optionally allow regenerate/edit.
 
 ---
 
-## 1) Supabase schema design (v1)
+## Approach overview (implement all)
+A) Implement a robust slug generator:
+- `slug = slugify(title) + "-" + <randomSuffix>`
+- Use **10–12 chars** of a safe alphabet (base62 or base32), derived from `crypto.getRandomValues`.
+- This avoids collisions even with global uniqueness.
 
-Create these tables in Supabase (SQL Editor). Use UUID user IDs from `auth.users`.
+B) Ensure every newly created/imported tree gets a slug immediately.
 
-### 1.1 `profiles`
-User profile + display settings.
+C) Make publish upsert resilient:
+- Attempt upsert/insert.
+- If Supabase error indicates **unique violation on slug**, regenerate slug and retry (max 3–5 tries).
+- Persist the final winning slug back into local tree state and local cache.
 
-Columns:
-- `id uuid primary key references auth.users(id) on delete cascade`
-- `display_name text`
-- `avatar_url text`
-- `created_at timestamptz default now()`
-- `updated_at timestamptz default now()`
+D) Improve diagnostics:
+- Surface Supabase error code/message in console (and optionally in UI toast for non-sensitive cases).
 
-RLS policies:
-- SELECT: user can select own profile
-- INSERT: user can insert own profile
-- UPDATE: user can update own profile
-
-### 1.2 `user_progress`
-User progress per concept/lesson/course.
-
-Columns:
-- `id bigserial primary key`
-- `user_id uuid references auth.users(id) on delete cascade`
-- `entity_type text check (entity_type in ('concept','lesson','course'))`
-- `entity_id text not null`
-- `status text` (e.g., 'unseen','seen','bronze','silver','gold','completed')
-- `xp int default 0`
-- `meta jsonb default '{}'::jsonb`
-- `updated_at timestamptz default now()`
-
-Constraints / Indexes:
-- unique `(user_id, entity_type, entity_id)`
-
-RLS:
-- SELECT/INSERT/UPDATE/DELETE: user can only access rows where `user_id = auth.uid()`.
-
-### 1.3 `concepts`
-All concept definitions, including creator custom concepts.
-
-Columns:
-- `id text primary key`
-- `created_by uuid references auth.users(id) on delete set null`
-- `title text not null`
-- `summary text`
-- `domain text`
-- `tags text[]`
-- `is_public boolean default false`
-- `created_at timestamptz default now()`
-- `updated_at timestamptz default now()`
-
-RLS:
-- SELECT: `(is_public = true) OR (created_by = auth.uid())`
-- INSERT/UPDATE/DELETE: `(created_by = auth.uid())`
-
-### 1.4 `lessons`
-Lesson metadata and content pointers.
-
-Columns:
-- `id text primary key`
-- `created_by uuid references auth.users(id) on delete set null`
-- `title text not null`
-- `description text`
-- `content_type text check (content_type in ('video','game','quiz','article','external'))`
-- `content_url text`
-- `payload jsonb default '{}'::jsonb`
-- `is_public boolean default false`
-- `created_at timestamptz default now()`
-- `updated_at timestamptz default now()`
-
-RLS:
-- SELECT: `(is_public = true) OR (created_by = auth.uid())`
-- INSERT/UPDATE/DELETE: `(created_by = auth.uid())`
-
-### 1.5 `courses`
-If you already have `creator_trees`, either rename it to `courses` or keep it but standardize behavior.
-
-Columns:
-- `id text primary key`
-- `created_by uuid references auth.users(id) on delete set null`
-- `title text not null`
-- `description text`
-- `slug text unique`
-- `is_published boolean default false`
-- `tree_json jsonb not null`
-- `created_at timestamptz default now()`
-- `updated_at timestamptz default now()`
-
-RLS:
-- SELECT: `(is_published = true) OR (created_by = auth.uid())`
-- INSERT/UPDATE/DELETE: `(created_by = auth.uid())`
+E) Optional (small UX improvement):
+- Display current slug near Publish with a “Regenerate” button (and/or editable slug field with validation).
 
 ---
 
-## 2) Supabase SQL deliverable
+## Step-by-step tasks
 
-Copilot must output a single file: `supabase_schema_v1.sql` that includes:
-- CREATE TABLE statements
-- ENABLE RLS on all tables
-- CREATE POLICY statements
-- indexes + unique constraints
+### 1) Add a shared slug utility
+Create: `docs/js/utils/slug.js` (or similar)
 
-Then I (Logan) will run that SQL in Supabase.
+Functions:
+- `slugifyTitle(title)`  
+  - lower-case
+  - trim
+  - replace spaces with hyphens
+  - remove unsafe chars
+  - collapse multiple hyphens
+  - fallback to `course` if empty
+- `randomSuffix(len=12)`  
+  - use `crypto.getRandomValues(new Uint8Array(len))`
+  - map to base62 chars `0-9a-zA-Z` (or base32)
+- `generateCourseSlug(title, len=12)`  
+  - returns `${slugifyTitle(title)}-${randomSuffix(len)}`
 
----
+Notes:
+- DO NOT use Math.random.
+- Keep deterministic slugify, random suffix for uniqueness.
+- Consider maximum length (e.g., 80 chars total); truncate slugify part if needed.
 
-## 3) Front-end architecture upgrade
+### 2) Ensure slug is assigned at course creation/import time
+Find where trees are created/imported:
+- `createCreatorTree()`
+- `importCreatorTree()`
+- anywhere a new tree object is formed
 
-### 3.1 Add a Data Access Layer (DAL)
-Create: `docs/js/dataStore.js`
+Set:
+- If `tree.slug` missing, set `tree.slug = generateCourseSlug(tree.title || tree.name)`
 
-Functions to implement (minimum):
-- Profiles:
-  - `getProfile()`
-  - `upsertProfile({ display_name, avatar_url })`
-- Progress:
-  - `getUserProgress()`
-  - `upsertProgress({ entity_type, entity_id, status, xp, meta })`
-  - `bulkUpsertProgress(records)`
-- Concepts:
-  - `getConcept(id)`
-  - `getConcepts(ids[])`
-  - `upsertConcept(concept)`
-- Lessons:
-  - `getLesson(id)`
-  - `getLessons(ids[])`
-  - `upsertLesson(lesson)`
-- Courses:
-  - `getCourseById(id)`
-  - `getCourseBySlug(slug)`
-  - `getCoursesPublic()`
-  - `getCoursesByUser()`
-  - `upsertCourse(course)`
-  - `deleteCourse(id)` (owner-only)
+For legacy trees:
+- When loading a tree that has no slug, generate one once and persist locally so it stops defaulting to common values.
 
-Requirements:
-- Use **one** Supabase client (from `supabaseClient.js`).
-- Add simple caching in localStorage (stale-while-revalidate):
-  - e.g., `cache:courses_public`, `cache:concepts`, `cache:lessons`
-- Always treat Supabase as the source of truth.
+### 3) Harden publish / upsert logic with retries
+Locate publish flow:
+- likely `docs/js/creator.js` calling DAL `upsertCourse()`.
 
-### 3.2 Refactor existing code to call DAL
-Search and replace:
-- Any reads/writes to `localStorage` for core entities (concepts/lessons/courses/progress/profile)
-- Any loads from `graph.json` / `lessons.json` used as real data (keep only as optional fallback demos)
+Implement:
+- `publishCourseWithRetry(tree, maxRetries=5)`
+  - Ensure authenticated session ready first (keep your existing session gating).
+  - Ensure tree.slug exists; if not, generate.
+  - Try `upsertCourse(tree)`:
+    - If success: persist returned slug to local tree + update local list.
+    - If failure:
+      - If **unique violation on slug**, regenerate slug and retry.
+      - Else: throw / show error.
 
-Update pages:
-- `courses.html` list should come from `getCoursesPublic()`
-- `creator.html` editor should use `getCoursesByUser()` and `upsertCourse()`
-- `subtree.html` viewer should use `getCourseById/Slug()` and then batch fetch referenced concepts/lessons
+How to detect slug unique violation:
+- Postgres SQLSTATE `23505` for unique violation.
+- In supabase-js error, check:
+  - `error.code === '23505'` OR
+  - `error.message` includes `duplicate key value violates unique constraint`
+  - and ideally confirm constraint name includes `courses_slug_key` (or whatever your schema creates).
 
----
+If you can’t reliably get constraint name due to RLS masking:
+- treat any `23505` as conflict, but log full details.
 
-## 4) One-time migration (legacy localStorage → Supabase)
+Important:
+- If `upsertCourse` uses `upsert` with conflict target `id`, then a slug conflict can still fail.
+- Ensure publish path either:
+  - updates existing course row by `id` (owner) OR inserts if missing.
+  - If the course already exists (same id), slug update should be allowed; if slug collides, retry.
 
-On first load AFTER upgrade (user must be signed in):
-1. Detect legacy keys (examples; adjust to your actual names):
-   - `gep_userProfile`
-   - `gep_progress`
-   - `gep_customConcepts`
-   - `gep_customLessons`
-   - `gep_creatorTrees`
-2. For each present key, migrate:
-   - Profile → `profiles` (upsert)
-   - Progress → `user_progress` (bulk upsert)
-   - Custom concepts → `concepts` (created_by=auth.uid(), is_public=false)
-   - Custom lessons → `lessons` (created_by=auth.uid(), is_public=false)
-   - Draft courses → `courses` (is_published=false)
-3. Set `localStorage.setItem('migration:v1:done','1')` after success.
-4. Do not rerun if flag exists.
+### 4) Persist the “winning slug”
+Once publish succeeds:
+- Update the in-memory tree object
+- Update localStorage cache/store for that tree
+- Ensure courses list and deep-linking use the stored slug
 
-Add a toast: “Migration completed.”
+### 5) Add UI helpers (minimal)
+In `creator.html` near publish controls:
+- Show: `Slug: <currentSlug>`
+- Add a small button: “Regenerate”
+  - `tree.slug = generateCourseSlug(tree.title)`
+  - Update the UI
+  - Do NOT auto-publish; user chooses publish.
 
----
+Optional:
+- Make slug editable with validation:
+  - validate slugify format
+  - enforce min length
+  - show warning “Must be unique globally; we’ll auto-fix on publish if taken.”
 
-## 5) Publish flow requirements (critical)
+### 6) Improve error messaging
+When publish fails:
+- In console: log the full supabase error object.
+- In UI toast:
+  - If retries exhausted due to slug conflicts: “Couldn’t find a unique URL slug. Try Regenerate.”
+  - If other error: “Cloud publish failed: <short reason>”
 
-When publishing a course:
-1. Ensure `tree_json` includes nodes + edges + positions.
-2. Extract referenced concept IDs and lesson IDs from `tree_json`.
-3. Upsert any missing referenced concepts/lessons to Supabase BEFORE marking course published.
-4. Set:
-   - `is_published = true`
-   - Ensure `slug` exists and is stable
-
----
-
-## 6) Viewer flow requirements (critical)
-
-In `subtree.html`:
-1. Fetch course by id or slug from Supabase.
-2. Extract needed concept IDs + lesson IDs.
-3. Batch fetch those via DAL (`getConcepts`, `getLessons`).
-4. Render.
-5. If anything missing:
-   - show placeholders
-   - show message: “This course needs republishing.”
-
-Also ensure deep-linking works with no prerequisite page visits.
+Do not leak sensitive info in UI; console logging is fine.
 
 ---
 
-## 7) User progress requirements
-
-Whenever user completes a lesson / node quiz:
-- write progress via DAL:
-  - `entity_type` + `entity_id`
-  - status + xp + meta
-
-Render UI badges using progress map from `getUserProgress()`.
+## Files to inspect and likely edit
+- `docs/js/creator.js` (publish flow)
+- `docs/js/creatorTreeStore.js` (creation/import logic)
+- `docs/js/dataStore.js` (upsertCourse, insert/update behavior)
+- Any slug helpers currently embedded in these files
 
 ---
 
-## 8) Testing checklist (must pass)
-
-Authenticated:
-- Create concept/lesson/course → refresh → persists
-- Publish course → incognito can view course + concepts/lessons
-- Progress persists across devices
-
-Unauthenticated:
-- Can browse published courses
-- Cannot see private drafts
-
-Security:
-- User A cannot edit/delete User B content (RLS enforced)
+## Verification plan
+1. Create 20 courses with similar titles (“Music Basics”) and publish: all should succeed.
+2. Simulate collision:
+   - Force set two local trees to same slug manually, publish both; second must auto-regenerate and succeed.
+3. Confirm deep link:
+   - Open `subtree.html?slug=<slug>` (or your routing) and it loads.
+4. Confirm stability:
+   - Republish the same course: slug remains unchanged unless conflict forces regeneration.
+5. Confirm no regression:
+   - Auth session gating still works
+   - Delete course still works (RLS policies unaffected)
 
 ---
 
-## 9) Deliverables Copilot must output
-
-1. `supabase_schema_v1.sql`
-2. `docs/js/dataStore.js`
-3. Refactors to use DAL as source of truth
-4. One-time migration logic
-5. Updated publish + viewer logic ensuring referenced content exists
+## Deliverables you must output
+1. Code changes implementing the slug utility + creation-time slug assignment.
+2. Publish retry mechanism handling unique violations robustly.
+3. Minimal UI slug display + Regenerate button.
+4. Short notes at end: what changed + how to test.
 
 End.

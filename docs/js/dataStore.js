@@ -38,6 +38,7 @@ function writeCache(key, data) {
 
 function tableNameCourses() { return 'courses'; }
 function tableNameLegacyTrees() { return 'creator_trees'; }
+function isUuid(v) { return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); }
 
 // Generic helpers -----------------------------------------------------------
 async function selectOne(table, filters) {
@@ -161,21 +162,26 @@ export async function upsertConcept(concept = {}) {
   if (!c) return { ok: false, error: new Error('Supabase not configured') };
   const { user } = await getAuthUser();
   if (!user) return { ok: false, error: new Error('No auth user') };
+  // Align with public.concepts schema: owner_id, title, summary, content(jsonb), tags[], is_published
   const payload = {
-    id: concept.id,
-    created_by: user.id,
+    owner_id: user.id,
     title: concept.title,
     summary: concept.summary || concept.description || '',
-    domain: concept.domain || concept.subject || 'general',
+    content: {
+      domain: concept.domain || concept.subject || 'general',
+      source_id: concept.id || null
+    },
     tags: Array.isArray(concept.tags) ? concept.tags : [],
-    is_public: !!concept.is_public,
-    updated_at: nowIso(),
+    is_published: concept.is_public === true || concept.is_published === true
   };
-  const { error } = await upsert('concepts', payload, { onConflict: 'id' });
+  // Insert without specifying id to avoid invalid uuid errors
+  const { error } = await upsert('concepts', payload, {});
   if (!error) {
     const cache = readCache(CACHE_KEYS.concepts);
     const map = cache.data && typeof cache.data === 'object' ? cache.data : {};
-    map[payload.id] = { ...payload };
+    // Cache by source_id if provided, otherwise by title
+    const cacheKey = (payload.content && payload.content.source_id) || payload.title;
+    if (cacheKey) map[cacheKey] = { ...payload };
     writeCache(CACHE_KEYS.concepts, map);
   }
   return { ok: !error, error };
@@ -216,22 +222,28 @@ export async function upsertLesson(lesson = {}) {
   if (!c) return { ok: false, error: new Error('Supabase not configured') };
   const { user } = await getAuthUser();
   if (!user) return { ok: false, error: new Error('No auth user') };
+  // Align with public.lessons schema: owner_id, title, description, body(jsonb), duration_seconds, thumbnail_url, concept_ids[], is_published
   const payload = {
-    id: lesson.id,
-    created_by: user.id,
+    owner_id: user.id,
     title: lesson.title,
     description: lesson.description || '',
-    content_type: lesson.content_type || lesson.type || 'article',
-    content_url: lesson.content_url || '',
-    payload: lesson.payload || lesson.contentConfig || {},
-    is_public: !!lesson.is_public,
-    updated_at: nowIso(),
+    body: {
+      content_type: lesson.content_type || lesson.type || 'article',
+      content_url: lesson.content_url || '',
+      payload: lesson.payload || lesson.contentConfig || {}
+    },
+    duration_seconds: Number(lesson.duration_seconds || 0) || null,
+    thumbnail_url: lesson.thumbnail_url || null,
+    concept_ids: Array.isArray(lesson.concept_ids) ? lesson.concept_ids : [],
+    is_published: lesson.is_public === true || lesson.is_published === true
   };
-  const { error } = await upsert('lessons', payload, { onConflict: 'id' });
+  // Insert without specifying id to avoid invalid uuid errors
+  const { error } = await upsert('lessons', payload, {});
   if (!error) {
     const cache = readCache(CACHE_KEYS.lessons);
     const map = cache.data && typeof cache.data === 'object' ? cache.data : {};
-    map[payload.id] = { ...payload };
+    const cacheKey = lesson.id || payload.title;
+    if (cacheKey) map[cacheKey] = { ...payload };
     writeCache(CACHE_KEYS.lessons, map);
   }
   return { ok: !error, error };
@@ -243,7 +255,7 @@ function normalizeCourseRow(row) {
   const t = row.tree_json || {};
   return {
     id: row.id,
-    created_by: row.created_by,
+    created_by: row.owner_id,
     title: row.title || t.title || 'Untitled',
     description: row.description || t.description || '',
     slug: row.slug || null,
@@ -293,7 +305,7 @@ export async function getCoursesByUser() {
   if (!c) return { courses: [], error: new Error('Supabase not configured') };
   const { user } = await getAuthUser();
   if (!user) return { courses: [], error: new Error('No auth user') };
-  let { data, error } = await c.from(tableNameCourses()).select('*').eq('created_by', user.id);
+  let { data, error } = await c.from(tableNameCourses()).select('*').eq('owner_id', user.id);
   if (error || !Array.isArray(data)) {
     const { data: legacy, error: legacyErr } = await c.from(tableNameLegacyTrees()).select('*').eq('owner_id', user.id);
     if (!legacyErr && Array.isArray(legacy)) { data = legacy; error = null; }
@@ -307,8 +319,8 @@ export async function upsertCourse(course = {}) {
   const { user } = await getAuthUser();
   if (!user) return { id: null, error: new Error('No auth user') };
   const payload = {
-    id: course.id,
-    created_by: user.id,
+    ...(isUuid(course.id) ? { id: course.id } : {}),
+    owner_id: user.id,
     title: course.title || 'Untitled',
     description: course.description || '',
     slug: course.slug || null,
@@ -316,7 +328,8 @@ export async function upsertCourse(course = {}) {
     tree_json: course.tree_json || course.tree || {},
     updated_at: nowIso(),
   };
-  let { data, error } = await upsert(tableNameCourses(), payload, { onConflict: 'id' });
+  const options = isUuid(course.id) ? { onConflict: 'id' } : {};
+  let { data, error } = await upsert(tableNameCourses(), payload, options);
   if (error) {
     const msg = String(error.message || '').toLowerCase();
     const code = String(error.code || '');
@@ -335,7 +348,7 @@ export async function upsertCourse(course = {}) {
       return { id: Array.isArray(legacyData) && legacyData[0] ? legacyData[0].id : legacyPayload.id || null, error: legacyErr };
     }
   }
-  return { id: Array.isArray(data) && data[0] ? data[0].id : payload.id || null, error };
+  return { id: Array.isArray(data) && data[0] ? data[0].id : (isUuid(course.id) ? course.id : null), error };
 }
 
 export async function deleteCourse(id) {
@@ -344,7 +357,7 @@ export async function deleteCourse(id) {
   const { user } = await getAuthUser();
   if (!user) return { ok: false, error: new Error('No auth user') };
   // Prefer new table; restrict by owner
-  let { data, error } = await removeWhere(tableNameCourses(), { id, created_by: user.id });
+  let { data, error } = await removeWhere(tableNameCourses(), { id, owner_id: user.id });
   if (error) {
     const { data: legacy, error: legacyErr } = await removeWhere(tableNameLegacyTrees(), { id, owner_id: user.id });
     if (!legacyErr) { data = legacy; error = null; }
