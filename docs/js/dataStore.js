@@ -261,7 +261,7 @@ function normalizeCourseRow(row) {
   const t = row.tree_json || {};
   return {
     id: row.id,
-    created_by: row.owner_id,
+    created_by: row.owner_id || row.created_by,
     title: row.title || t.title || 'Untitled',
     description: row.description || t.description || '',
     slug: row.slug || null,
