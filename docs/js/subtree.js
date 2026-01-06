@@ -23,8 +23,8 @@ let _cloudLessonsByConcept = new Map(); // conceptId -> Array(lesson)
 })();
 
 (async function init(){
-  const ok = ensureActiveUserOrRedirect();
-  if (!ok) return;
+  // Allow guest viewing: do not block when no active local user
+  ensureActiveUserOrRedirect();
   await loadGraphStore();
   await loadLessons();
   // Fetch cloud user progress to render badges

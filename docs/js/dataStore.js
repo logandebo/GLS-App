@@ -277,6 +277,13 @@ export async function getCourseById(id) {
   if (!c) return { course: null, error: new Error('Supabase not configured') };
   // Prefer new 'courses' table; fallback to legacy 'creator_trees' if needed
   let { data, error } = await selectOne(tableNameCourses(), { id });
+  // If owner-only row blocked by RLS or not found, try published-only read for public viewers
+  if ((error || !data) && c) {
+    try {
+      const res = await c.from(tableNameCourses()).select('*').eq('id', id).eq('is_published', true).limit(1).maybeSingle();
+      if (!res.error && res.data) { data = res.data; error = null; }
+    } catch {}
+  }
   if (error || !data) {
     const { data: legacy, error: legacyErr } = await selectOne(tableNameLegacyTrees(), { id });
     if (!legacyErr && legacy) { data = legacy; error = null; }
