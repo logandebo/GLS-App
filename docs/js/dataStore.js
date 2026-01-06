@@ -39,6 +39,12 @@ function writeCache(key, data) {
 function tableNameCourses() { return 'courses'; }
 function tableNameLegacyTrees() { return 'creator_trees'; }
 function isUuid(v) { return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); }
+function hasColumnError(err, col, table) {
+  const msg = String(err && err.message || '').toLowerCase();
+  const code = String(err && err.code || '');
+  if (code === 'PGS274') return true; // PostgREST schema cache column error
+  return msg.includes(`could not find the '${String(col).toLowerCase()}' column`) && msg.includes(String(table || '').toLowerCase());
+}
 
 // Generic helpers -----------------------------------------------------------
 async function selectOne(table, filters) {
@@ -305,7 +311,12 @@ export async function getCoursesByUser() {
   if (!c) return { courses: [], error: new Error('Supabase not configured') };
   const { user } = await getAuthUser();
   if (!user) return { courses: [], error: new Error('No auth user') };
+  // Try owner_id filter first; if schema uses created_by, fallback
   let { data, error } = await c.from(tableNameCourses()).select('*').eq('owner_id', user.id);
+  if (error && hasColumnError(error, 'owner_id', tableNameCourses())) {
+    const res = await c.from(tableNameCourses()).select('*').eq('created_by', user.id);
+    data = res.data; error = res.error;
+  }
   if (error || !Array.isArray(data)) {
     const { data: legacy, error: legacyErr } = await c.from(tableNameLegacyTrees()).select('*').eq('owner_id', user.id);
     if (!legacyErr && Array.isArray(legacy)) { data = legacy; error = null; }
@@ -318,9 +329,8 @@ export async function upsertCourse(course = {}) {
   if (!c) return { id: null, error: new Error('Supabase not configured') };
   const { user } = await getAuthUser();
   if (!user) return { id: null, error: new Error('No auth user') };
-  const payload = {
+  const base = {
     ...(isUuid(course.id) ? { id: course.id } : {}),
-    owner_id: user.id,
     title: course.title || 'Untitled',
     description: course.description || '',
     slug: course.slug || null,
@@ -329,7 +339,12 @@ export async function upsertCourse(course = {}) {
     updated_at: nowIso(),
   };
   const options = isUuid(course.id) ? { onConflict: 'id' } : {};
-  let { data, error } = await upsert(tableNameCourses(), payload, options);
+  // Attempt owner_id; if column missing, retry with created_by
+  let { data, error } = await upsert(tableNameCourses(), { ...base, owner_id: user.id }, options);
+  if (error && hasColumnError(error, 'owner_id', tableNameCourses())) {
+    const res = await upsert(tableNameCourses(), { ...base, created_by: user.id }, options);
+    data = res.data; error = res.error;
+  }
   if (error) {
     const msg = String(error.message || '').toLowerCase();
     const code = String(error.code || '');
@@ -358,6 +373,10 @@ export async function deleteCourse(id) {
   if (!user) return { ok: false, error: new Error('No auth user') };
   // Prefer new table; restrict by owner
   let { data, error } = await removeWhere(tableNameCourses(), { id, owner_id: user.id });
+  if (error && hasColumnError(error, 'owner_id', tableNameCourses())) {
+    const res = await removeWhere(tableNameCourses(), { id, created_by: user.id });
+    data = res.data; error = res.error;
+  }
   if (error) {
     const { data: legacy, error: legacyErr } = await removeWhere(tableNameLegacyTrees(), { id, owner_id: user.id });
     if (!legacyErr) { data = legacy; error = null; }
