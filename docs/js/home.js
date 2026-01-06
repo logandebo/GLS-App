@@ -3,7 +3,8 @@
 import { /* getActiveUsername, getActiveProfile, migrateLegacyProfileIfNeeded, ensureActiveUserOrRedirect, setActiveUsername */ } from './storage.js';
 import { APP_VERSION, IS_DEV } from './config.js';
 import { subscribe, getState } from './auth/authStore.js?v=20260103';
-import { loadPublicCatalog, loadTreeMetrics, savePublicCatalog, saveTreeMetrics, refreshPublicCatalogFromCloud } from './catalogStore.js';
+import { loadTreeMetrics, saveTreeMetrics } from './catalogStore.js';
+import { getCoursesPublic, swrGetCoursesPublic } from './dataStore.js';
 import { loadAllLessons } from './contentLoader.js';
 import { loadUserTreeProgress } from './userTreeProgress.js';
 import { loadUserPreferences } from './preferences.js';
@@ -43,13 +44,12 @@ export async function initHome(){
     // Keep up-to-date during this page's lifecycle
     subscribe((ns) => { _liveUserId = ns.user ? (ns.user.user_metadata?.username || (ns.user.email||'').split('@')[0]) : null; renderPersonalized(); });
     // Homepage is accessible when logged out; do not enforce demo or redirect.
-    _catalog = loadPublicCatalog();
-    // Try to refresh catalog from cloud in background
+    // Load published courses from cloud; do not use localStorage catalog
     try {
-      const ok = await refreshPublicCatalogFromCloud();
-      if (ok) {
-        _catalog = loadPublicCatalog();
-      }
+      const immediate = await swrGetCoursesPublic();
+      _catalog = Array.isArray(immediate) ? immediate.map(mapCourseToTree) : [];
+      const { courses } = await getCoursesPublic();
+      if (Array.isArray(courses)) _catalog = courses.map(mapCourseToTree);
     } catch {}
     // If no published catalog exists, only seed in dev or with explicit demo flag
     const demoEnabled = IS_DEV || new URLSearchParams(location.search).get('demo') === '1' || localStorage.getItem('gls_demo_enabled') === '1';
@@ -71,11 +71,11 @@ export async function initHome(){
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
-        savePublicCatalog([sampleTree]);
+        // Seed metrics only; catalog remains cloud-only
         const metrics = loadTreeMetrics();
         metrics[sampleTree.id] = { views: 0, starts: 0, completions: 0 };
         saveTreeMetrics(metrics);
-        _catalog = loadPublicCatalog();
+        _catalog = [sampleTree];
       } catch (e) {
         console.warn('Seeding default catalog failed', e);
       }
@@ -96,10 +96,9 @@ export async function initHome(){
     } catch (e){
       console.warn('Optional lessons load failed; continuing without counts', e);
     }
-    // Live updates for published trees and metrics
+    // Live updates for metrics only; courses are cloud-sourced
     window.addEventListener('storage', (e) => {
-      if (e.key === 'gep_publicCreatorTrees' || e.key === 'gep_treeMetrics') {
-        _catalog = loadPublicCatalog();
+      if (e.key === 'gep_treeMetrics') {
         _metrics = loadTreeMetrics();
         renderFeaturedCourses();
         renderPersonalized();
@@ -121,6 +120,37 @@ function initHero(){
     if (top) window.location.href = `subtree.html?treeId=${encodeURIComponent(top.id)}`;
     else window.location.href = 'courses.html';
   });
+}
+
+function mapCourseToTree(row){
+  const t = row && row.tree_json ? row.tree_json : {};
+  const nodes = Array.isArray(t.nodes) ? t.nodes.map(n => ({
+    conceptId: n.conceptId,
+    nextIds: Array.isArray(n.nextIds) ? n.nextIds.slice() : [],
+    ...(Array.isArray(n.subtreeLessonIds) ? { subtreeLessonIds: n.subtreeLessonIds.slice() } : {}),
+    ...(n.subtreeLessonSteps && typeof n.subtreeLessonSteps === 'object' ? { subtreeLessonSteps: { ...n.subtreeLessonSteps } } : {}),
+    ...(n.ui ? { ui: { x: Number(n.ui.x)||0, y: Number(n.ui.y)||0 } } : {}),
+    unlockConditions: {
+      requiredConceptIds: Array.isArray(n.unlockConditions?.requiredConceptIds) ? n.unlockConditions.requiredConceptIds.slice() : [],
+      minBadge: n.unlockConditions?.minBadge || 'none',
+      ...(n.unlockConditions?.customRuleId ? { customRuleId: n.unlockConditions.customRuleId } : {})
+    }
+  })) : [];
+  return {
+    id: row.id,
+    title: t.title || row.title || 'Untitled Tree',
+    description: t.description || row.description || '',
+    creatorId: t.creatorId || row.created_by || 'unknown',
+    primaryDomain: t.primaryDomain || 'general',
+    tags: Array.isArray(t.tags) ? t.tags.slice() : [],
+    rootConceptId: t.rootConceptId || '',
+    introVideoUrl: t.introVideoUrl || '',
+    ui: { layoutMode: (t.ui && t.ui.layoutMode) ? String(t.ui.layoutMode) : 'top-down' },
+    nodes,
+    version: Number.isFinite(t.version) ? t.version : 1,
+    createdAt: t.createdAt || row.created_at || new Date().toISOString(),
+    updatedAt: t.updatedAt || row.updated_at || new Date().toISOString()
+  };
 }
 
 function pickFeatured(catalog){
