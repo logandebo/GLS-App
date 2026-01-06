@@ -287,7 +287,9 @@ export async function getCourseById(id) {
 export async function getCourseBySlug(slug) {
   const c = getClient();
   if (!c) return { course: null, error: new Error('Supabase not configured') };
-  const { data, error } = await selectOne(tableNameCourses(), { slug });
+  // Public access: restrict to published courses to satisfy RLS policies
+  let q = c.from(tableNameCourses()).select('*').eq('slug', slug).eq('is_published', true).limit(1).maybeSingle();
+  const { data, error } = await q;
   return { course: normalizeCourseRow(data), error };
 }
 

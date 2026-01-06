@@ -1,7 +1,7 @@
 import { ensureActiveUserOrRedirect, getActiveUsername, getActiveProfile } from './storage.js';
 import { renderToast } from './ui.js';
 import { loadPublicCatalog, savePublicCatalog, getQueryParam, incrementMetric, refreshPublicCatalogFromCloud } from './catalogStore.js';
-import { getCourseById, getUserProgress as dsGetUserProgress, getLessons as dsGetLessons, getConcepts as dsGetConcepts } from './dataStore.js';
+import { getCourseById, getCourseBySlug, getUserProgress as dsGetUserProgress, getLessons as dsGetLessons, getConcepts as dsGetConcepts } from './dataStore.js';
 import { loadGraphStore, getAllNodes as gsGetAllNodes } from './graphStore.js';
 import { loadPublicConcepts } from './contentLoader.js';
 import { loadConceptProgress, computeMasteryTier } from './conceptProgress.js';
@@ -55,13 +55,21 @@ let _cloudLessonsByConcept = new Map(); // conceptId -> Array(lesson)
   });
   _combinedIndex = mergedById;
   const treeId = getQueryParam('treeId');
-  if (!treeId) { showNotFound(); return; }
+  const slug = getQueryParam('slug');
+  if (!treeId && !slug) { showNotFound(); return; }
   let catalog = loadPublicCatalog();
-  let tree = catalog.find(t => t.id === treeId);
+  let tree = treeId ? catalog.find(t => t.id === treeId) : null;
   // Fallback: fetch directly from Supabase via DAL and normalize into local shape
   if (!tree) {
     try {
-      const { course } = await getCourseById(treeId);
+      let course = null;
+      if (slug) {
+        const res = await getCourseBySlug(slug);
+        course = res.course;
+      } else if (treeId) {
+        const res = await getCourseById(treeId);
+        course = res.course;
+      }
       if (course && course.tree_json) {
         const row = course;
         const t = row.tree_json || {};
