@@ -588,9 +588,28 @@ function publishCurrentTree(){
           if (!upErr) { renderToast('Cloud course updated', 'info'); renderCloudPublishStatus(); }
           else { renderToast('Cloud publish failed (update). Check slug/id conflicts.', 'error'); }
         } else {
-          const { id, error: upErr } = await dsUpsertCourse({ id: tree.id, title: tree.title || 'Untitled', description: tree.description || '', slug: stableSlug, tree_json: tree, is_published: true });
-          if (id && !upErr) { updateCreatorTree(userId, tree.id, { supabaseId: id }); renderToast('Cloud course published', 'success'); renderCloudPublishStatus(); }
-          else { renderToast('Cloud publish failed (insert). Check slug uniqueness.', 'error'); }
+          // Try multiple slug candidates to avoid unique conflicts
+          const baseSlug = String(stableSlug || '').trim() || tree.id;
+          const suffixA = (tree.id || '').slice(-6).toLowerCase();
+          const candidates = Array.from(new Set([
+            baseSlug,
+            tree.id,
+            `${slugifyId(baseSlug)}-${suffixA}`
+          ])).filter(Boolean);
+          let published = false, lastErr = null, chosenSlug = null, newId = null;
+          for (const cand of candidates) {
+            const { id, error: tryErr } = await dsUpsertCourse({ id: tree.id, title: tree.title || 'Untitled', description: tree.description || '', slug: cand, tree_json: tree, is_published: true });
+            if (!tryErr && id) { published = true; newId = id; chosenSlug = cand; break; }
+            lastErr = tryErr;
+          }
+          if (published && newId) {
+            updateCreatorTree(userId, tree.id, { supabaseId: newId, slug: chosenSlug });
+            renderToast(`Cloud course published (slug: ${chosenSlug})`, 'success');
+            renderCloudPublishStatus();
+          } else {
+            renderToast('Cloud publish failed (insert). Slug conflict unresolved.', 'error');
+            if (lastErr && lastErr.message) console.warn('[PUBLISH-DIAG] Insert failed:', lastErr.message);
+          }
         }
       } catch {}
     })();
