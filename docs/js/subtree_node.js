@@ -3,12 +3,13 @@ import { getOrCreateDefaultProfile } from './user.js';
 import { renderToast } from './ui.js';
 import { loadGraphStore, getAllNodes as gsGetAllNodes } from './graphStore.js';
 import { loadPublicConcepts } from './contentLoader.js';
-import { loadPublicCatalog, getQueryParam, incrementMetric } from './catalogStore.js';
+import { loadPublicCatalog, getQueryParam, incrementMetric, refreshPublicCatalogFromCloud } from './catalogStore.js';
+import { getCourseById, getCourseBySlug, listConcepts } from './dataStore.js';
 import { loadLessons, getLessonsForConcept, getAllLessons } from './lessons.js';
 import { loadUserTreeProgress, markNodeTouched, setLastNode } from './userTreeProgress.js';
 
 let _masterIndex = null;
-let _combinedIndex = null; // master + public concepts
+let _combinedIndex = null; // master + public concepts from Supabase
 
 (function initHeader(){
   const usernameEl = document.getElementById('header-username');
@@ -19,35 +20,148 @@ let _combinedIndex = null; // master + public concepts
 })();
 
 (async function init(){
+  console.log('[subtree_node] INIT START');
   const ok = ensureActiveUserOrRedirect();
+  console.log('[subtree_node] Auth check:', ok);
   if (!ok) return;
   await loadGraphStore();
   const nodes = gsGetAllNodes();
+  console.log('[subtree_node] Master nodes loaded:', nodes.length);
   _masterIndex = new Map(nodes.map(n => [n.id, n]));
-  const publicConcepts = loadPublicConcepts();
+  
+  // Load all concepts from Supabase (returns all published concepts)
   const mergedById = new Map(nodes.map(n => [n.id, n]));
-  Object.keys(publicConcepts || {}).forEach(id => {
-    const c = publicConcepts[id];
-    if (c && c.id && !mergedById.has(c.id)) mergedById.set(c.id, c);
-  });
+  try {
+    console.log('[subtree_node] Loading concepts from Supabase...');
+    const { concepts } = await listConcepts();
+    console.log('[subtree_node] Loaded concepts:', concepts ? concepts.length : 0);
+    if (Array.isArray(concepts)) {
+      concepts.forEach(c => {
+        if (c && c.id && !mergedById.has(c.id)) {
+          console.log('[subtree_node] Adding concept to index:', c.id, c.title);
+          mergedById.set(c.id, c);
+        }
+      });
+    }
+  } catch (e) {
+    console.error('[subtree_node] Failed to load concepts from Supabase:', e);
+    // Fallback to localStorage if Supabase fails
+    const publicConcepts = loadPublicConcepts();
+    Object.keys(publicConcepts || {}).forEach(id => {
+      const c = publicConcepts[id];
+      if (c && c.id && !mergedById.has(c.id)) mergedById.set(c.id, c);
+    });
+  }
   _combinedIndex = mergedById;
+  console.log('[subtree_node] Total concepts in index:', _combinedIndex.size);
+  console.log('[subtree_node] Concept IDs:', Array.from(_combinedIndex.keys()));
 
   const treeId = getQueryParam('treeId');
   const conceptId = getQueryParam('conceptId');
-  if (!treeId || !conceptId){ renderToast('Missing tree or concept context', 'error'); return; }
+  console.log('[subtree_node] URL params - treeId:', treeId, 'conceptId:', conceptId);
+  if (!treeId || !conceptId){ 
+    console.error('[subtree_node] Missing params - treeId:', treeId, 'conceptId:', conceptId);
+    renderToast('Missing tree or concept context', 'error'); 
+    return; 
+  }
+  // Ensure local catalog cache is hydrated from Supabase for deep links
+  console.log('[subtree_node] Refreshing catalog from cloud...');
+  try { 
+    await refreshPublicCatalogFromCloud(); 
+    console.log('[subtree_node] Catalog refresh complete');
+  } catch (e) {
+    console.error('[subtree_node] Catalog refresh failed:', e);
+  }
   const catalog = loadPublicCatalog();
-  const tree = catalog.find(t => t.id === treeId);
-  if (!tree){ renderToast('Course not found or unpublished', 'error'); return; }
+  console.log('[subtree_node] Catalog loaded, courses:', catalog ? catalog.length : 0);
+  let tree = catalog.find(t => t.id === treeId);
+  console.log('[subtree_node] Tree found in catalog:', !!tree);
+  // Fallback: fetch from Supabase directly and normalize if not cached
+  if (!tree) {
+    console.log('[subtree_node] Tree not in catalog, fetching from Supabase...');
+    try {
+      let course = null;
+      if (treeId) {
+        console.log('[subtree_node] Calling getCourseById with treeId:', treeId);
+        const res = await getCourseById(treeId);
+        console.log('[subtree_node] getCourseById result:', res);
+        course = res.course;
+      }
+      // Optional slug fallback
+      if (!course) {
+        const slug = getQueryParam('slug');
+        if (slug) {
+          const res = await getCourseBySlug(slug);
+          course = res.course;
+        }
+      }
+      if (course && course.tree_json) {
+        const row = course;
+        const t = row.tree_json || {};
+        const nlist = Array.isArray(t.nodes) ? t.nodes.map(n => ({
+          conceptId: n.conceptId,
+          nextIds: Array.isArray(n.nextIds) ? n.nextIds.slice() : [],
+          ...(Array.isArray(n.subtreeLessonIds) ? { subtreeLessonIds: n.subtreeLessonIds.slice() } : {}),
+          ...(n.subtreeLessonSteps && typeof n.subtreeLessonSteps === 'object' ? { subtreeLessonSteps: { ...n.subtreeLessonSteps } } : {}),
+          ...(n.ui ? { ui: { x: Number(n.ui.x)||0, y: Number(n.ui.y)||0 } } : {}),
+          unlockConditions: {
+            requiredConceptIds: Array.isArray(n.unlockConditions?.requiredConceptIds) ? n.unlockConditions.requiredConceptIds.slice() : [],
+            minBadge: n.unlockConditions?.minBadge || 'none',
+            ...(n.unlockConditions?.customRuleId ? { customRuleId: n.unlockConditions.customRuleId } : {})
+          }
+        })) : [];
+        tree = {
+          id: row.id,
+          title: t.title || row.title || 'Untitled Tree',
+          description: t.description || '',
+          creatorId: t.creatorId || 'unknown',
+          primaryDomain: t.primaryDomain || 'general',
+          tags: Array.isArray(t.tags) ? t.tags.slice() : [],
+          rootConceptId: t.rootConceptId || '',
+          introVideoUrl: t.introVideoUrl || '',
+          ui: { layoutMode: (t.ui && t.ui.layoutMode) ? String(t.ui.layoutMode) : 'top-down' },
+          nodes: nlist,
+          version: Number.isFinite(t.version) ? t.version : 1,
+          createdAt: t.createdAt || row.created_at || new Date().toISOString(),
+          updatedAt: t.updatedAt || row.created_at || new Date().toISOString()
+        };
+        console.log('[subtree_node] Tree constructed from course:', tree.id, tree.title);
+      }
+    } catch (e) {
+      console.error('[subtree_node] Error fetching/constructing tree:', e);
+    }
+  }
+  if (!tree){ 
+    console.error('[subtree_node] Tree not found after all attempts - treeId:', treeId);
+    renderToast('Course not found or unpublished', 'error'); 
+    return; 
+  }
+  console.log('[subtree_node] Tree loaded successfully:', tree.title);
+  console.log('[subtree_node] Looking up concept with ID:', conceptId);
+  console.log('[subtree_node] _combinedIndex has', _combinedIndex.size, 'concepts');
+  console.log('[subtree_node] Available concept IDs:', Array.from(_combinedIndex.keys()));
   const concept = _combinedIndex.get(conceptId) || _masterIndex.get(conceptId);
-  if (!concept){ renderToast('Concept not found', 'error'); return; }
+  console.log('[subtree_node] Concept lookup result:', concept ? `Found: ${concept.title || concept.id}` : 'NOT FOUND');
+  if (!concept){ 
+    console.error('[subtree_node] CONCEPT NOT FOUND - conceptId:', conceptId);
+    console.error('[subtree_node] _combinedIndex keys:', Array.from(_combinedIndex.keys()));
+    console.error('[subtree_node] _masterIndex keys:', Array.from(_masterIndex.keys()));
+    renderToast('Concept not found', 'error'); 
+    return; 
+  }
   // Set Back to Course to return to the subtree page for this course
   const back = document.getElementById('backToCourse');
   if (back) back.href = `subtree.html?treeId=${encodeURIComponent(treeId)}`;
+  console.log('[subtree_node] Back button set to subtree.html');
   // Populate concept title in header
   const titleEl = document.getElementById('conceptTitle');
   if (titleEl) titleEl.textContent = (concept.title || concept.id || 'Concept');
+  console.log('[subtree_node] Title element set:', titleEl ? titleEl.textContent : 'NOT FOUND');
+  console.log('[subtree_node] Calling renderSubtreeLessons...');
   await renderSubtreeLessons(tree, conceptId);
+  console.log('[subtree_node] Calling renderAllLessons...');
   await renderAllLessons(conceptId);
+  console.log('[subtree_node] INIT COMPLETE');
 })();
 
 // Concept header and Next Steps panel removed from this page per design update.
@@ -221,24 +335,39 @@ function renderLessonCard(lesson, opts={}){
 }
 
 async function renderSubtreeLessons(tree, conceptId){
+  console.log('[renderSubtreeLessons] START - tree:', tree.id, 'conceptId:', conceptId);
   try {
+    console.log('[renderSubtreeLessons] Loading lessons...');
     await loadLessons();
     const all = getLessonsForConcept(conceptId) || [];
+    console.log('[renderSubtreeLessons] Lessons for concept:', all.length);
     const concept = _combinedIndex.get(conceptId) || _masterIndex.get(conceptId) || {};
     // Subtree-specific selection: if tree nodes include explicit subtreeLessonIds for this concept, use them; otherwise fall back to creator-authored lessons
     const node = (Array.isArray(tree.nodes) ? tree.nodes : []).find(n => n.conceptId === conceptId) || null;
+    console.log('[renderSubtreeLessons] Node found:', !!node, 'has subtreeLessonIds:', node?.subtreeLessonIds?.length || 0);
     let mine = [];
     if (node && Array.isArray(node.subtreeLessonIds) && node.subtreeLessonIds.length){
+      console.log('[renderSubtreeLessons] Using explicit subtreeLessonIds:', node.subtreeLessonIds);
       const allLessons = getAllLessons();
       const byId = new Map(allLessons.map(l => [l.id, l]));
       mine = node.subtreeLessonIds.map(id => byId.get(id)).filter(Boolean);
     } else {
+      console.log('[renderSubtreeLessons] Using creator-authored lessons, creatorId:', tree.creatorId);
       mine = all.filter(l => String(l.createdBy || '') === String(tree.creatorId || ''));
     }
+    console.log('[renderSubtreeLessons] Filtered lessons:', mine.length);
     const list = document.getElementById('subtreeLessonsList');
     const empty = document.getElementById('subtreeLessonsEmpty');
+    console.log('[renderSubtreeLessons] List element:', !!list, 'Empty element:', !!empty);
     list.innerHTML = '';
-    if (!mine.length){ empty.classList.remove('hidden'); return; } else { empty.classList.add('hidden'); }
+    if (!mine.length){ 
+      console.log('[renderSubtreeLessons] No lessons found, showing empty state');
+      empty.classList.remove('hidden'); 
+      return; 
+    } else { 
+      empty.classList.add('hidden'); 
+    }
+    console.log('[renderSubtreeLessons] Rendering', mine.length, 'lesson cards...');
     // Debug: inspect lesson object structure for mapping
     try { console.debug('Subtree lessons sample:', mine[0]); } catch {}
     // Group by step from published mapping (default step 1 if none assigned)
@@ -287,14 +416,25 @@ async function renderSubtreeLessons(tree, conceptId){
 }
 
 async function renderAllLessons(conceptId){
+  console.log('[renderAllLessons] START - conceptId:', conceptId);
   try {
+    console.log('[renderAllLessons] Loading lessons...');
     await loadLessons();
     const all = getLessonsForConcept(conceptId) || [];
+    console.log('[renderAllLessons] Total lessons for concept:', all.length);
     const concept = _combinedIndex.get(conceptId) || _masterIndex.get(conceptId) || {};
     const list = document.getElementById('allLessonsList');
     const empty = document.getElementById('allLessonsEmpty');
+    console.log('[renderAllLessons] List element:', !!list, 'Empty element:', !!empty);
     list.innerHTML = '';
-    if (!all.length){ empty.classList.remove('hidden'); return; } else { empty.classList.add('hidden'); }
+    if (!all.length){ 
+      console.log('[renderAllLessons] No lessons, showing empty state');
+      empty.classList.remove('hidden'); 
+      return; 
+    } else { 
+      empty.classList.add('hidden'); 
+    }
+    console.log('[renderAllLessons] Rendering', all.length, 'lesson cards...');
     // Debug: inspect lesson object structure for mapping
     try { console.debug('All lessons sample:', all[0]); } catch {}
 
@@ -304,5 +444,9 @@ async function renderAllLessons(conceptId){
       const el = renderLessonCard(l, { conceptThumbnail: concept.thumbnail, originContext: { conceptId } });
       list.appendChild(el);
     });
-  } catch { /* ignore */ }
+    console.log('[renderAllLessons] COMPLETE - rendered', all.length, 'cards');
+  } catch (e) { 
+    console.error('[renderAllLessons] ERROR:', e);
+    console.error('[renderAllLessons] Stack:', e.stack);
+  }
 }
