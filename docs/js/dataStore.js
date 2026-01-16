@@ -387,12 +387,18 @@ export async function listMyLessons() {
 export async function listPublicLessons() {
   const c = getClient();
   if (!c) return { lessons: [], error: new Error('Supabase not configured') };
+  console.log('[listPublicLessons] Querying lessons with is_public=true, is_published=true');
   const { data, error } = await c
     .from('lessons')
     .select('*')
     .eq('is_public', true)
     .eq('is_published', true)
     .order('updated_at', { ascending: false });
+  console.log('[listPublicLessons] Query result:', data?.length || 0, 'lessons', 'error:', error);
+  if (data) {
+    console.log('[listPublicLessons] All lesson IDs:', data.map(l => l.id));
+    console.log('[listPublicLessons] All concept_ids:', data.map(l => l.concept_id));
+  }
   return { lessons: Array.isArray(data) ? data : [], error };
 }
 
