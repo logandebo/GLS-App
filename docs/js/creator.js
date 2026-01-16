@@ -1,6 +1,6 @@
 import { loadGraphStore, getAllNodes as gsGetAllNodes } from './graphStore.js';
 import { loadCustomConcepts, loadAllLessons, CUSTOM_LESSONS_KEY } from './contentLoader.js';
-import { migrateLegacyProfileIfNeeded, ensureActiveUserOrRedirect, getActiveProfile, createDefaultProfile, saveActiveProfile, getActiveUsername } from './storage.js';
+import { migrateLegacyProfileIfNeeded, ensureActiveUserOrRedirect, getActiveProfile, createDefaultProfile, saveActiveProfile, getActiveUsername, setActiveUsername } from './storage.js';
 import { renderToast } from './ui.js';
 import { publishTree as publishToCatalog, unpublishTree as unpublishFromCatalog, getLastPublishMissingConceptIds } from './catalogStore.js';
 import { getCoursesByUser as dsGetCoursesByUser, upsertCourse as dsUpsertCourse, deleteCourse as dsDeleteCourse, upsertConcept as dsUpsertConcept, upsertLesson as dsUpsertLesson } from './dataStore.js';
@@ -33,6 +33,7 @@ let _insLessonsSearchRenderTick = 0;
 // Watch for lesson store changes to update visual editor counts live
 let _lessonsWatchTimer = null;
 let _lastLessonsRaw = null;
+let _cloudCourses = [];
 
 (function initHeader() {
   const usernameEl = document.getElementById('header-username');
@@ -44,23 +45,34 @@ let _lastLessonsRaw = null;
 
 (async function initBuilder(){
   migrateLegacyProfileIfNeeded();
-  const active = ensureActiveUserOrRedirect();
-  if (!active) return;
+  let active = ensureActiveUserOrRedirect();
+  // If no active local user, try Supabase session or fall back to guest
+  if (!active) {
+    try {
+      const sb = window.supabaseClient;
+      if (sb && typeof sb.isConfigured === 'function' && sb.isConfigured()) {
+        const { data } = await sb.getSession();
+        const uid = data?.session?.user?.id;
+        if (uid) {
+          setActiveUsername(uid);
+          active = uid;
+        }
+      }
+    } catch {}
+    if (!active) {
+      active = 'guest';
+      try { setActiveUsername(active); } catch {}
+    }
+  }
   let profile = getActiveProfile();
   if (!profile) { profile = createDefaultProfile(active); saveActiveProfile(profile); }
   _activeProfile = profile;
   try {
-    await loadGraphStore();
-    _masterNodes = gsGetAllNodes();
-    _masterIndex = buildMasterIndex(_masterNodes);
-    _customConcepts = loadCustomConcepts();
-    // Build combined title index for display and combined search set
-    const mergedById = new Map();
-    _masterNodes.forEach(n => { if (n && n.id) mergedById.set(n.id, n); });
-    _customConcepts.forEach(n => { if (n && n.id && !mergedById.has(n.id)) mergedById.set(n.id, n); });
-    _titleIndex = mergedById;
-    _combinedIndex = mergedById;
-    _searchConcepts = Array.from(mergedById.values());
+    // Don't load master graph concepts - only use Supabase concepts
+    _masterNodes = [];
+    _masterIndex = new Map();
+    // Load concepts from Supabase and rebuild indexes
+    await rebuildConceptIndexes();
     // Preload lessons for editor node meta counts
     try {
       await loadLessons();
@@ -191,6 +203,29 @@ function loadTreeSelect(){
     opt.textContent = t.title || t.id;
     sel.appendChild(opt);
   });
+  // Append Cloud courses owned by the user (Supabase)
+  (async () => {
+    try {
+      _cloudCourses = [];
+      const sb = window.supabaseClient;
+      if (sb && typeof sb.isConfigured === 'function' && sb.isConfigured()) {
+        const { data } = await sb.getSession();
+        const user = data && data.session ? data.session.user : null;
+        if (user) {
+          const { courses, error } = await dsGetCoursesByUser();
+          if (!error && Array.isArray(courses) && courses.length) {
+            _cloudCourses = courses;
+            courses.forEach(row => {
+              const opt = document.createElement('option');
+              opt.value = 'cloud:' + row.id;
+              opt.textContent = (row.title || row.slug || row.id) + ' (cloud)';
+              sel.appendChild(opt);
+            });
+          }
+        }
+      }
+    } catch {}
+  })();
 	renderTreeList();
 }
 
@@ -214,6 +249,45 @@ function createNewTree(){
 
 function loadSelectedTree(treeId){
   if (!treeId) return;
+  // Load cloud course into local cache for editing
+  if (treeId.startsWith('cloud:')) {
+    (async () => {
+      try {
+        const cid = treeId.slice(6);
+        const { getCourseById } = await import('./dataStore.js');
+        const { course, error } = await getCourseById(cid);
+        if (error || !course) { renderToast('Cloud course not found', 'error'); return; }
+        const userId = getActiveUsername();
+        // If a local tree already mapped to this cloud course via slug, update it; else import
+        let trees = loadCreatorTrees(userId);
+        let existing = trees.find(t => t.supabaseId === course.id) || trees.find(t => (t.slug && course.slug && t.slug === course.slug));
+        if (!existing) {
+          // Import: create a local tree from cloud tree_json
+          const data = course.tree_json || { title: course.title || 'Untitled', description: course.description || '', nodes: [] };
+          const imported = importCreatorTree(userId, data, _combinedIndex || _masterIndex);
+          updateCreatorTree(userId, imported.id, { slug: course.slug || imported.slug, supabaseId: course.id });
+          _currentTreeId = imported.id;
+          document.getElementById('treeSelect').value = imported.id;
+          // Proceed with normal load
+          loadSelectedTree(imported.id);
+          return;
+        } else {
+          // Refresh local tree from cloud snapshot
+          existing.title = course.title || existing.title;
+          existing.description = course.description || existing.description;
+          existing.slug = course.slug || existing.slug;
+          existing.supabaseId = course.id;
+          const next = { ...existing, ...course.tree_json };
+          // Persist updated local tree
+          updateCreatorTree(userId, existing.id, { title: next.title, description: next.description, tags: next.tags || existing.tags, primaryDomain: next.primaryDomain || existing.primaryDomain, nodes: next.nodes || existing.nodes, rootConceptId: next.rootConceptId || existing.rootConceptId });
+          _currentTreeId = existing.id;
+          document.getElementById('treeSelect').value = existing.id;
+          // Proceed with normal load
+        }
+      } catch {}
+    })();
+    return;
+  }
   const userId = getActiveUsername();
   const tree = getCreatorTree(userId, treeId);
   if (!tree) return;
@@ -321,16 +395,44 @@ function slugifyId(text){
   return `custom.${getActiveUsername() || 'user'}.${base || 'concept'}.${ts}`;
 }
 
-function rebuildConceptIndexes(){
+async function rebuildConceptIndexes(){
   try {
-    _customConcepts = loadCustomConcepts();
+    // Fetch concepts from Supabase instead of localStorage
+    const { listConcepts } = await import('./dataStore.js');
+    const { concepts, error } = await listConcepts();
+    if (error) {
+      console.error('Failed to load concepts from Supabase:', error);
+      // Fallback to empty if Supabase fails
+      _customConcepts = [];
+    } else {
+      // Map Supabase concepts to the expected format - use source_id to avoid duplicates
+      const uniqueMap = new Map();
+      (concepts || []).forEach(c => {
+        const id = c.content?.source_id || c.id;
+        if (!uniqueMap.has(id)) {
+          uniqueMap.set(id, {
+            id: id,
+            title: c.title,
+            subject: c.content?.domain || 'general',
+            summary: c.summary || '',
+            tags: c.tags || [],
+            estimatedMinutesToBasicMastery: 20,
+            isCustom: true,
+            createdBy: c.owner_id
+          });
+        }
+      });
+      _customConcepts = Array.from(uniqueMap.values());
+    }
+    // Only show concepts from Supabase in search results (not master nodes)
     const mergedById = new Map();
-    _masterNodes.forEach(n => { if (n && n.id) mergedById.set(n.id, n); });
-    _customConcepts.forEach(n => { if (n && n.id && !mergedById.has(n.id)) mergedById.set(n.id, n); });
+    _customConcepts.forEach(n => { if (n && n.id) mergedById.set(n.id, n); });
     _titleIndex = mergedById;
     _combinedIndex = mergedById;
     _searchConcepts = Array.from(mergedById.values());
-  } catch {}
+  } catch (e) {
+    console.error('rebuildConceptIndexes error:', e);
+  }
 }
 
 async function createNewConcept(){
@@ -342,43 +444,50 @@ async function createNewConcept(){
   if (!title){ renderToast('Enter a concept title', 'warning'); return; }
   const userId = getActiveUsername();
   if (!userId){ renderToast('No active user', 'error'); return; }
-  const idCandidate = slugifyId(title);
-  const existing = loadCustomConcepts();
-  const allIds = new Set([...(existing || []).map(c => c.id), ..._masterNodes.map(n => n.id)]);
-  let id = idCandidate;
-  let ctr = 0;
-  while (allIds.has(id)) { ctr++; id = idCandidate + '.' + ctr; }
   const tags = tagsStr ? tagsStr.split(',').map(s => s.trim()).filter(Boolean) : [];
   const concept = {
-    id,
     title,
     subject: subject || 'general',
+    domain: subject || 'general',
     tags,
     estimatedMinutesToBasicMastery: 20,
     isCustom: true,
+    is_published: true,  // Mark as published so it appears in searches
     createdBy: userId
   };
-  const nextList = Array.isArray(existing) ? existing.slice() : [];
-  nextList.push(concept);
   try {
-    // Persist
-    const { saveCustomConcepts } = await import('./contentLoader.js');
-    saveCustomConcepts(nextList);
-    rebuildConceptIndexes();
+    // Save to Supabase (database will auto-generate UUID)
+    const { upsertConcept } = await import('./dataStore.js');
+    const { ok, data, error } = await upsertConcept(concept);
+    if (!ok || error) {
+      console.error('Failed to create concept in Supabase:', error);
+      renderToast('Failed to create concept in database', 'error');
+      return;
+    }
+    // Update local indexes
+    await rebuildConceptIndexes();
     renderToast('Concept created', 'success');
+    // Use the actual UUID from the database (data.id is the primary key)
+    const conceptId = data?.id || '';
+    if (!conceptId) {
+      renderToast('Concept created but ID missing', 'error');
+      return;
+    }
+    // Add to local cache with UUID
+    _customConcepts.push({ ...concept, id: conceptId });
     // If a node is selected and unbound, bind it; otherwise append to sequence
     const userId2 = getActiveUsername();
     const tree = _currentTreeId ? getCreatorTree(userId2, _currentTreeId) : null;
     const selectedNode = tree && _selectedNodeCid ? tree.nodes.find(n => n.conceptId === _selectedNodeCid) : null;
     if (selectedNode && !selectedNode.conceptId){
-      selectedNode.conceptId = concept.id;
+      selectedNode.conceptId = conceptId;
       updateCreatorTree(userId2, tree.id, { nodes: tree.nodes });
       renderToast('Bound new concept to selected node', 'success');
       renderInspector();
     } else {
-      appendConceptToSequence(concept.id);
+      appendConceptToSequence(conceptId);
     }
-    if (msgEl) msgEl.textContent = `Created: ${concept.id}`;
+    if (msgEl) msgEl.textContent = `Created: ${title} (${conceptId})`;
   } catch (e) {
     console.error('Failed to create concept', e);
     renderToast('Failed to create concept', 'error');
@@ -519,6 +628,21 @@ function saveCurrentTree(){
 	renderTreeList();
   refreshVisualEditor();
   renderIntroVideoPreview();
+  // Also save to Supabase as draft (source of truth)
+  (async () => {
+    try {
+      const sb = window.supabaseClient;
+      if (sb && typeof sb.isConfigured === 'function' && sb.isConfigured()) {
+        await (sb.waitForSessionReady ? sb.waitForSessionReady(2000, 150) : Promise.resolve());
+        const payload = { title: tree.title, description: tree.description, slug: tree.slug, tree_json: tree, is_published: false };
+        const { id, error } = await dsUpsertCourse(payload);
+        if (!error && id) {
+          updateCreatorTree(userId, tree.id, { supabaseId: id });
+          renderCloudPublishStatus();
+        }
+      }
+    } catch {}
+  })();
 }
 
 function publishCurrentTree(){
@@ -572,33 +696,9 @@ function publishCurrentTree(){
           }
         } catch {}
 
-        // Pre-publish: upsert referenced concepts and lessons to Supabase (set public)
-        const conceptIds = Array.from(new Set((tree.nodes || []).map(n => n.conceptId).filter(Boolean)));
-        const lessonIds = new Set();
-        (tree.nodes || []).forEach(n => {
-          (Array.isArray(n.subtreeLessonIds) ? n.subtreeLessonIds : []).forEach(id => lessonIds.add(id));
-          Object.keys(n.subtreeLessonSteps || {}).forEach(id => lessonIds.add(id));
-        });
-        let conceptsSynced = 0, lessonsSynced = 0;
-        for (const cid of conceptIds) {
-          const c = (_titleIndex && _titleIndex.get(cid)) || _masterIndex.get(cid) || null;
-          if (c && c.id) {
-            const payload = { id: c.id, title: c.title || c.id, summary: c.shortDescription || c.longDescription || c.summary || '', domain: c.subject || c.primaryDomain || 'general', tags: Array.isArray(c.tags) ? c.tags : [], is_public: true };
-            const { error } = await dsUpsertConcept(payload);
-            if (!error) conceptsSynced++;
-          }
-        }
-        for (const lid of Array.from(lessonIds)) {
-          const l = _lessonById ? _lessonById.get(lid) : null;
-          if (l && l.id) {
-            const payload = { id: l.id, title: l.title || l.id, description: l.description || l.summary || '', content_type: l.type || l.contentType || 'article', content_url: (l.media && l.media.url) || l.videoUrl || '', payload: l.contentConfig || {}, is_public: true };
-            const { error } = await dsUpsertLesson(payload);
-            if (!error) lessonsSynced++;
-          }
-        }
-        if (conceptsSynced || lessonsSynced) {
-          renderToast(`Synced ${conceptsSynced} concepts, ${lessonsSynced} lessons to cloud`, 'info');
-        }
+        // Supabase is source of truth for lessons; do not re-upsert here.
+        // Ensure course publishes with existing lesson references only.
+        // If needed, add safety checks here to verify presence, but avoid duplicating lesson rows.
 
         // Ensure slug exists
         if (!tree.slug) { tree.slug = generateCourseSlug(tree.title || 'course'); updateCreatorTree(userId, tree.id, { slug: tree.slug }); }
@@ -607,9 +707,10 @@ function publishCurrentTree(){
         const isUniqueViolation = (err) => !!(err && (err.code === '23505' || /duplicate key/i.test(err.message || '') || /slug/i.test(err.message || '')));
 
         async function publishCourseWithRetry(maxRetries = 5) {
-          const payloadBase = { id: tree.id, title: baseTitle, description: tree.description || '', tree_json: tree, is_published: true };
+          // Don't pass local tree.id to upsertCourse - let it generate a UUID if needed
+          const payloadBase = { title: baseTitle, description: tree.description || '', tree_json: tree, is_published: true, slug: tree.slug };
           if (supabaseId) {
-            const { error } = await dsUpsertCourse({ ...payloadBase, id: supabaseId, slug: tree.slug });
+            const { error } = await dsUpsertCourse({ ...payloadBase, id: supabaseId });
             if (!error) { updateCreatorTree(userId, tree.id, { supabaseId }); return { ok: true, id: supabaseId }; }
             if (!isUniqueViolation(error)) return { ok: false, error };
           }
@@ -617,12 +718,13 @@ function publishCurrentTree(){
           let attempts = 0, lastErr = null, newId = null;
           while (attempts < maxRetries) {
             attempts++;
-            const { id, error } = await dsUpsertCourse({ ...payloadBase, slug: tree.slug });
+            const { id, error } = await dsUpsertCourse(payloadBase);
             if (!error && id) { newId = id; break; }
             lastErr = error;
             if (isUniqueViolation(error)) {
               const clean = slugifyTitle(baseTitle);
-              tree.slug = `${clean}-${randomSuffix(12)}`;
+              payloadBase.slug = `${clean}-${randomSuffix(12)}`;
+              tree.slug = payloadBase.slug;
               updateCreatorTree(userId, tree.id, { slug: tree.slug });
               try { const el = document.getElementById('slugDisplay'); if (el) el.textContent = tree.slug; } catch {}
               continue;
@@ -873,24 +975,62 @@ function validateAndShow(tree){
   }
 }
 
-function renderTreeList(){
+async function renderTreeList(){
 	const list = document.getElementById('treeList');
 	if (!list) return;
 	const userId = getActiveUsername();
-	const trees = loadCreatorTrees(userId);
+	
+	// Load trees from localStorage
+	const localTrees = loadCreatorTrees(userId);
+	
+	// Load trees from Supabase
+	let cloudCourses = [];
+	try {
+		const sb = window.supabaseClient;
+		if (sb && typeof sb.isConfigured === 'function' && sb.isConfigured()) {
+			const { data } = await sb.getSession();
+			const user = data && data.session ? data.session.user : null;
+			if (user) {
+				const { courses, error } = await dsGetCoursesByUser();
+				if (!error && Array.isArray(courses)) {
+					cloudCourses = courses;
+				}
+			}
+		}
+	} catch (e) {
+		console.error('[renderTreeList] Error loading cloud courses:', e);
+	}
+	
+	// Combine local and cloud trees
+	const allTrees = [...localTrees, ...cloudCourses.map(c => ({
+		id: 'cloud:' + c.id,
+		actualId: c.id,
+		title: c.title || c.slug || c.id,
+		isCloud: true,
+		cloudData: c
+	}))];
+	
 	list.innerHTML = '';
-	if (!trees.length){
+	if (!allTrees.length){
 		const empty = document.createElement('div');
 		empty.className = 'short';
 		empty.textContent = 'No trees created yet.';
 		list.appendChild(empty);
 		return;
 	}
-	trees.forEach(t => {
+	allTrees.forEach(t => {
 		const row = document.createElement('div');
 		row.className = 'row';
 		const title = document.createElement('span');
 		title.textContent = t.title || t.id;
+		if (t.isCloud) {
+			const badge = document.createElement('span');
+			badge.style.marginLeft = '0.5rem';
+			badge.style.fontSize = '0.8em';
+			badge.style.color = '#888';
+			badge.textContent = '(cloud)';
+			title.appendChild(badge);
+		}
 		const actions = document.createElement('div');
 		const loadBtn = document.createElement('button');
 		loadBtn.type = 'button'; loadBtn.className = 'btn subtle small'; loadBtn.textContent = 'Load';
@@ -898,25 +1038,51 @@ function renderTreeList(){
 		const expBtn = document.createElement('button');
 		expBtn.type = 'button'; expBtn.className = 'btn subtle small'; expBtn.textContent = 'Export';
 		expBtn.addEventListener('click', () => {
-			const data = exportCreatorTree(t);
-			try {
-				const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-				const a = document.createElement('a'); const url = URL.createObjectURL(blob); a.href = url;
-				const safeTitle = (t.title||'tree').replace(/[^a-z0-9-_]+/gi,'_').toLowerCase();
-				a.download = `creator_tree_${safeTitle}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-				renderToast('Tree exported', 'success');
-			} catch { renderToast('Export failed', 'error'); }
+			if (t.isCloud) {
+				const data = { id: t.actualId, title: t.title, tree_json: t.cloudData.tree_json };
+				try {
+					const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+					const a = document.createElement('a'); const url = URL.createObjectURL(blob); a.href = url;
+					const safeTitle = (t.title||'tree').replace(/[^a-z0-9-_]+/gi,'_').toLowerCase();
+					a.download = `cloud_tree_${safeTitle}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+					renderToast('Tree exported', 'success');
+				} catch { renderToast('Export failed', 'error'); }
+			} else {
+				const data = exportCreatorTree(t);
+				try {
+					const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+					const a = document.createElement('a'); const url = URL.createObjectURL(blob); a.href = url;
+					const safeTitle = (t.title||'tree').replace(/[^a-z0-9-_]+/gi,'_').toLowerCase();
+					a.download = `creator_tree_${safeTitle}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+					renderToast('Tree exported', 'success');
+				} catch { renderToast('Export failed', 'error'); }
+			}
 		});
 		const delBtn = document.createElement('button');
 		delBtn.type = 'button'; delBtn.className = 'btn subtle small'; delBtn.textContent = 'Delete';
-		delBtn.addEventListener('click', () => {
+		delBtn.addEventListener('click', async () => {
 			const ok = confirm('Delete this tree?');
 			if (!ok) return;
-			deleteCreatorTree(userId, t.id);
-			if (_currentTreeId === t.id){ _currentTreeId = null; _sequence = []; }
-			renderToast('Tree deleted', 'info');
+			if (t.isCloud) {
+				try {
+					const { deleteCourse } = await import('./dataStore.js');
+					const { ok: delOk, error } = await deleteCourse(t.actualId);
+					if (delOk) {
+						renderToast('Cloud tree deleted', 'info');
+					} else {
+						renderToast('Delete failed: ' + (error?.message || 'Unknown error'), 'error');
+					}
+				} catch (e) {
+					renderToast('Delete failed: ' + e.message, 'error');
+				}
+			} else {
+				deleteCreatorTree(userId, t.id);
+				if (_currentTreeId === t.id){ _currentTreeId = null; _sequence = []; }
+				renderToast('Tree deleted', 'info');
+				renderSequence();
+			}
 			loadTreeSelect();
-			renderSequence();
+			await renderTreeList();
 		});
 		actions.appendChild(loadBtn);
 		actions.appendChild(expBtn);
@@ -1267,6 +1433,7 @@ async function renderInspectorLessonSearchResults(){
   const byId = new Map();
   (allLessons || []).forEach(l => {
     if (!l || !l.id) return;
+    // Only include lessons that match this node's concept
     if (l.conceptId !== node.conceptId) return;
     if (!byId.has(l.id)) byId.set(l.id, l);
   });
