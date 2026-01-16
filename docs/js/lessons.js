@@ -5,8 +5,11 @@ let _lessonMap = null; // Map id -> lesson
 
 export async function loadLessons() {
 	if (_lessons) return _lessons;
+	console.log('[loadLessons] Loading lessons from Supabase...');
 	const merged = await loadAllLessons();
+	console.log('[loadLessons] loadAllLessons returned:', merged?.length || 0, 'lessons');
 	_lessons = Array.isArray(merged) ? merged : (merged?.lessons || []);
+	console.log('[loadLessons] After normalization:', _lessons.length, 'lessons');
 	buildLessonMap(_lessons);
 	return _lessons;
 }
@@ -23,7 +26,15 @@ export function getLessonById(id) {
 
 export function getLessonsForConcept(conceptId) {
 	const arr = Array.isArray(_lessons) ? _lessons : [];
-	return arr.filter(l => l && l.conceptId === conceptId);
+	console.log('[getLessonsForConcept] Searching for conceptId:', conceptId);
+	console.log('[getLessonsForConcept] Total lessons loaded:', arr.length);
+	if (arr.length > 0) {
+		console.log('[getLessonsForConcept] Sample lesson:', arr[0]);
+		console.log('[getLessonsForConcept] Lesson conceptIds:', arr.map(l => l?.conceptId));
+	}
+	const filtered = arr.filter(l => l && l.conceptId === conceptId);
+	console.log('[getLessonsForConcept] Filtered lessons:', filtered.length);
+	return filtered;
 }
 
 export function buildLessonMap(lessonsArray) {
