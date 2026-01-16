@@ -259,7 +259,8 @@ function renderGraph(tree){
       incrementMetric(tree.id, 'starts', 1);
       markNodeTouched(userId, tree.id, node.conceptId);
       setLastNode(userId, tree.id, node.conceptId);
-      window.location.href = `subtree_node.html?treeId=${encodeURIComponent(tree.id)}&conceptId=${encodeURIComponent(node.conceptId)}`;
+      const slugParam = tree.slug ? `&slug=${encodeURIComponent(tree.slug)}` : '';
+      window.location.href = `subtree_node.html?treeId=${encodeURIComponent(tree.id)}&conceptId=${encodeURIComponent(node.conceptId)}${slugParam}`;
     },
     isNodeLocked: (node) => !isUnlocked(node, userId),
     getNodeStatus: (node) => {
@@ -342,6 +343,7 @@ function setupContinue(tree){
     const unlocked = isUnlocked(node, userId);
     if (!unlocked) { renderToast('Last node is locked', 'warning'); return; }
     incrementMetric(tree.id, 'starts', 1);
-    window.location.href = `subtree_node.html?treeId=${encodeURIComponent(tree.id)}&conceptId=${encodeURIComponent(last)}`;
+    const slugParam = tree.slug ? `&slug=${encodeURIComponent(tree.slug)}` : '';
+    window.location.href = `subtree_node.html?treeId=${encodeURIComponent(tree.id)}&conceptId=${encodeURIComponent(last)}${slugParam}`;
   });
 }

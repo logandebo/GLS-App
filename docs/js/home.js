@@ -141,6 +141,7 @@ function mapCourseToTree(row){
     title: t.title || row.title || 'Untitled Tree',
     description: t.description || row.description || '',
     creatorId: t.creatorId || row.created_by || 'unknown',
+    creatorName: row.creatorName || null,
     primaryDomain: t.primaryDomain || 'general',
     tags: Array.isArray(t.tags) ? t.tags.slice() : [],
     rootConceptId: t.rootConceptId || '',

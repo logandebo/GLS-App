@@ -39,6 +39,21 @@ function writeCache(key, data) {
 function tableNameCourses() { return 'courses'; }
 function tableNameLegacyTrees() { return 'creator_trees'; }
 function isUuid(v) { return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); }
+function genId() {
+  try { 
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch (e) {
+    console.warn('crypto.randomUUID failed:', e);
+  }
+  // Fallback: generate UUID v4 manually
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
 function hasColumnError(err, col, table) {
   const msg = String(err && err.message || '').toLowerCase();
   const code = String(err && err.code || '');
@@ -163,6 +178,30 @@ export async function getConcepts(ids = []) {
   return { concepts: Array.isArray(data) ? data : [], error };
 }
 
+export async function listConcepts() {
+  const c = getClient();
+  if (!c) {
+    // If Supabase is not configured, return empty array (don't use stale cache)
+    return { concepts: [], error: new Error('Supabase not configured') };
+  }
+  const { data, error } = await c.from('concepts').select('*').order('title', { ascending: true });
+  if (!error && Array.isArray(data)) {
+    const map = {};
+    data.forEach(cn => { 
+      if (cn && cn.id) {
+        // Store by UUID id
+        map[cn.id] = cn;
+        // Also store by source_id if available for backward compatibility
+        if (cn.content && cn.content.source_id) {
+          map[cn.content.source_id] = cn;
+        }
+      }
+    });
+    writeCache(CACHE_KEYS.concepts, map);
+  }
+  return { concepts: Array.isArray(data) ? data : [], error };
+}
+
 export async function upsertConcept(concept = {}) {
   const c = getClient();
   if (!c) return { ok: false, error: new Error('Supabase not configured') };
@@ -181,16 +220,21 @@ export async function upsertConcept(concept = {}) {
     is_published: concept.is_public === true || concept.is_published === true
   };
   // Insert without specifying id to avoid invalid uuid errors
-  const { error } = await upsert('concepts', payload, {});
+  const { data, error } = await upsert('concepts', payload, {});
   if (!error) {
     const cache = readCache(CACHE_KEYS.concepts);
     const map = cache.data && typeof cache.data === 'object' ? cache.data : {};
-    // Cache by source_id if provided, otherwise by title
-    const cacheKey = (payload.content && payload.content.source_id) || payload.title;
-    if (cacheKey) map[cacheKey] = { ...payload };
+    // Cache the returned record with its UUID
+    if (data && Array.isArray(data) && data[0]) {
+      const record = data[0];
+      map[record.id] = record;
+      if (record.content && record.content.source_id) {
+        map[record.content.source_id] = record;
+      }
+    }
     writeCache(CACHE_KEYS.concepts, map);
   }
-  return { ok: !error, error };
+  return { ok: !error, data: data && Array.isArray(data) ? data[0] : null, error };
 }
 
 // Lessons ------------------------------------------------------------------
@@ -221,6 +265,147 @@ export async function getLessons(ids = []) {
     writeCache(CACHE_KEYS.lessons, map);
   }
   return { lessons: Array.isArray(data) ? data : [], error };
+}
+
+// New: Create a draft lesson row immediately
+export async function createLessonDraft(initial = {}) {
+  const c = getClient();
+  if (!c) return { lesson: null, error: new Error('Supabase not configured') };
+  const { user } = await getAuthUser();
+  if (!user) return { lesson: null, error: new Error('No auth user') };
+  
+  // User validation
+  
+  // Generate UUID id to match database schema (lessons.id is uuid type)
+  let id;
+  try {
+    id = initial.id || crypto.randomUUID();
+    // Generated UUID
+  } catch (e) {
+    console.error('[dataStore] crypto.randomUUID() failed:', e);
+    // Fallback: manual UUID v4 generation
+    id = initial.id || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+    // Fallback UUID
+  }
+  
+  // Map content types to match DB CHECK constraint: ('video','game','quiz','article','external')
+  let contentType = initial.content_type || initial.type || 'video';
+  if (contentType === 'unity_game') contentType = 'game';
+  if (contentType === 'external_link') contentType = 'external';
+  if (contentType === 'keyboard') contentType = 'game'; // keyboard lessons are a game variant
+  
+  const payload = {
+    id,
+    owner_id: user.id,      // Required NOT NULL field
+    user_id: user.id,
+    created_by: user.id,
+    title: initial.title || 'Untitled',
+    description: initial.description || '',
+    content_type: contentType,
+    content_url: initial.content_url || '',
+    concept_id: initial.concept_id || null,  // Link to parent concept
+    payload: initial.payload || initial.contentConfig || {},
+    is_public: initial.is_public !== undefined ? initial.is_public : false,
+    is_published: initial.is_published !== undefined ? initial.is_published : false,
+    created_at: nowIso(),
+    updated_at: nowIso()
+  };
+  // Creating lesson draft
+  
+  try {
+    const { data, error } = await c.from('lessons').insert(payload).select('*').maybeSingle();
+    if (error) {
+      console.error('[dataStore] createLessonDraft error:', error);
+      return { lesson: null, error };
+    } else {
+      // Draft created
+      return { lesson: data, error: null };
+    }
+  } catch (e) {
+    console.error('[dataStore] createLessonDraft exception:', e);
+    return { lesson: null, error: e };
+  }
+}
+
+// New: Update an existing draft lesson row (partial patch)
+export async function updateLessonDraft(lessonId, patch = {}) {
+  const c = getClient();
+  if (!c) return { ok: false, error: new Error('Supabase not configured') };
+  const { user } = await getAuthUser();
+  if (!user) return { ok: false, error: new Error('No auth user') };
+  
+  // Map content types to match DB CHECK constraint
+  let contentType = patch.content_type;
+  if (contentType === 'unity_game') contentType = 'game';
+  if (contentType === 'external_link') contentType = 'external';
+  if (contentType === 'keyboard') contentType = 'game';
+  
+  const rowPatch = {
+    ...(patch.title != null ? { title: patch.title } : {}),
+    ...(patch.description != null ? { description: patch.description } : {}),
+    ...(contentType != null ? { content_type: contentType } : {}),
+    ...(patch.content_url != null ? { content_url: patch.content_url } : {}),
+    ...(patch.payload != null ? { payload: patch.payload } : {}),
+    ...(patch.is_public != null ? { is_public: !!patch.is_public } : {}),
+    ...(patch.is_published != null ? { is_published: !!patch.is_published } : {}),
+    updated_at: nowIso()
+  };
+  // Updating lesson draft
+  const { data, error } = await c
+    .from('lessons')
+    .update(rowPatch)
+    .eq('id', lessonId)
+    .or(`created_by.eq.${user.id},user_id.eq.${user.id}`)
+    .select('*')
+    .maybeSingle();
+  if (error) {
+    console.error('[dataStore] updateLessonDraft error:', error);
+  } else {
+    // Update successful
+  }
+  return { ok: !error && !!data, error, lesson: data || null };
+}
+
+// New: List my lessons (owner scope)
+export async function listMyLessons() {
+  const c = getClient();
+  if (!c) return { lessons: [], error: new Error('Supabase not configured') };
+  const { user } = await getAuthUser();
+  if (!user) return { lessons: [], error: new Error('No auth user') };
+  const { data, error } = await c
+    .from('lessons')
+    .select('*')
+    .or(`created_by.eq.${user.id},user_id.eq.${user.id}`)
+    .order('updated_at', { ascending: false });
+  return { lessons: Array.isArray(data) ? data : [], error };
+}
+
+// New: List public + published lessons
+export async function listPublicLessons() {
+  const c = getClient();
+  if (!c) return { lessons: [], error: new Error('Supabase not configured') };
+  const { data, error } = await c
+    .from('lessons')
+    .select('*')
+    .eq('is_public', true)
+    .eq('is_published', true)
+    .order('updated_at', { ascending: false });
+  return { lessons: Array.isArray(data) ? data : [], error };
+}
+
+// Optional: Delete a lesson (owner scope)
+export async function deleteLesson(lessonId) {
+  const c = getClient();
+  if (!c) return { ok: false, error: new Error('Supabase not configured') };
+  const { user } = await getAuthUser();
+  if (!user) return { ok: false, error: new Error('No auth user') };
+  let q = c.from('lessons').delete().eq('id', lessonId).or(`created_by.eq.${user.id},user_id.eq.${user.id}`).select('*');
+  const { data, error } = await q;
+  const count = Array.isArray(data) ? data.length : (data ? 1 : 0);
+  return { ok: !error && count > 0, error };
 }
 
 export async function upsertLesson(lesson = {}) {
@@ -259,14 +444,24 @@ export async function upsertLesson(lesson = {}) {
 function normalizeCourseRow(row) {
   if (!row) return null;
   const t = row.tree_json || {};
+  // Extract display_name from joined profiles table
+  const creatorName = row.profiles?.display_name || null;
   return {
     id: row.id,
     created_by: row.owner_id || row.created_by,
+    creator_id: row.owner_id || row.created_by,
+    creatorId: row.owner_id || row.created_by,
+    creatorName: creatorName,
     title: row.title || t.title || 'Untitled',
     description: row.description || t.description || '',
     slug: row.slug || null,
     is_published: !!row.is_published,
     tree_json: t,
+    // Extract tree_json fields to top level for backward compatibility
+    nodes: t.nodes || [],
+    rootConceptId: t.rootConceptId,
+    primaryDomain: t.primaryDomain,
+    tags: t.tags || [],
     created_at: row.created_at || nowIso(),
     updated_at: row.updated_at || nowIso()
   };
@@ -275,18 +470,31 @@ function normalizeCourseRow(row) {
 export async function getCourseById(id) {
   const c = getClient();
   if (!c) return { course: null, error: new Error('Supabase not configured') };
-  // Prefer new 'courses' table; fallback to legacy 'creator_trees' if needed
-  let { data, error } = await selectOne(tableNameCourses(), { id });
+  // Fetching course by ID
+  let { data, error } = await c.from(tableNameCourses()).select('*').eq('id', id).limit(1).maybeSingle();
   // If owner-only row blocked by RLS or not found, try published-only read for public viewers
   if ((error || !data) && c) {
     try {
       const res = await c.from(tableNameCourses()).select('*').eq('id', id).eq('is_published', true).limit(1).maybeSingle();
       if (!res.error && res.data) { data = res.data; error = null; }
-    } catch {}
+    } catch (e) {
+      console.error('[dataStore] getCourseById published query exception:', e);
+    }
   }
-  if (error || !data) {
-    const { data: legacy, error: legacyErr } = await selectOne(tableNameLegacyTrees(), { id });
+  // Only try legacy fallback if courses table truly doesn't exist (not just RLS)
+  if (error && error.message && error.message.includes('does not exist')) {
+    console.log('[dataStore] courses table does not exist, trying legacy creator_trees');
+    const { data: legacy, error: legacyErr } = await c.from(tableNameLegacyTrees()).select('*').eq('id', id).limit(1).maybeSingle();
     if (!legacyErr && legacy) { data = legacy; error = null; }
+  } else if (!data) {
+    console.error('[dataStore] getCourseById failed:', error);
+  }
+  // Fetch profile separately
+  if (data && data.created_by) {
+    const { data: profile } = await c.from('profiles').select('display_name').eq('id', data.created_by).limit(1).maybeSingle();
+    if (profile) {
+      data.profiles = { display_name: profile.display_name };
+    }
   }
   return { course: normalizeCourseRow(data), error };
 }
@@ -295,8 +503,14 @@ export async function getCourseBySlug(slug) {
   const c = getClient();
   if (!c) return { course: null, error: new Error('Supabase not configured') };
   // Public access: restrict to published courses to satisfy RLS policies
-  let q = c.from(tableNameCourses()).select('*').eq('slug', slug).eq('is_published', true).limit(1).maybeSingle();
-  const { data, error } = await q;
+  let { data, error } = await c.from(tableNameCourses()).select('*').eq('slug', slug).eq('is_published', true).limit(1).maybeSingle();
+  // Fetch profile separately
+  if (data && data.created_by) {
+    const { data: profile } = await c.from('profiles').select('display_name').eq('id', data.created_by).limit(1).maybeSingle();
+    if (profile) {
+      data.profiles = { display_name: profile.display_name };
+    }
+  }
   return { course: normalizeCourseRow(data), error };
 }
 
@@ -304,12 +518,31 @@ export async function getCoursesPublic() {
   const c = getClient();
   const cache = readCache(CACHE_KEYS.coursesPublic);
   if (!c) return { courses: Array.isArray(cache.data) ? cache.data : [], error: null };
+  
+  // Fetch courses
   let { data, error } = await c.from(tableNameCourses()).select('*').eq('is_published', true);
+  
   if (error || !Array.isArray(data) || data.length === 0) {
     // Fallback to legacy table if present
     const { data: legacy, error: legacyErr } = await c.from(tableNameLegacyTrees()).select('*').eq('is_published', true);
     if (!legacyErr && Array.isArray(legacy)) { data = legacy; error = null; }
   }
+  
+  // Fetch profiles separately and match them up
+  if (Array.isArray(data) && data.length > 0) {
+    const creatorIds = [...new Set(data.map(course => course.created_by).filter(Boolean))];
+    if (creatorIds.length > 0) {
+      const { data: profiles } = await c.from('profiles').select('id, display_name').in('id', creatorIds);
+      if (profiles && Array.isArray(profiles)) {
+        const profileMap = new Map(profiles.map(p => [p.id, p.display_name]));
+        data = data.map(course => ({
+          ...course,
+          profiles: { display_name: profileMap.get(course.created_by) || null }
+        }));
+      }
+    }
+  }
+  
   const mapped = Array.isArray(data) ? data.map(normalizeCourseRow) : [];
   writeCache(CACHE_KEYS.coursesPublic, mapped);
   return { courses: mapped, error };
@@ -321,7 +554,8 @@ export async function getCoursesByUser() {
   const { user } = await getAuthUser();
   if (!user) return { courses: [], error: new Error('No auth user') };
   // Try created_by filter first; if schema uses owner_id, fallback
-  let { data, error } = await c.from(tableNameCourses()).select('*').eq('created_by', user.id);
+  // Join with profiles to get creator display name
+  let { data, error } = await c.from(tableNameCourses()).select('*, profiles(display_name)').eq('created_by', user.id);
   if (error && hasColumnError(error, 'created_by', tableNameCourses())) {
     const res = await c.from(tableNameCourses()).select('*').eq('owner_id', user.id);
     data = res.data; error = res.error;
@@ -339,7 +573,6 @@ export async function upsertCourse(course = {}) {
   const { user } = await getAuthUser();
   if (!user) return { id: null, error: new Error('No auth user') };
   const base = {
-    ...(isUuid(course.id) ? { id: course.id } : {}),
     title: course.title || 'Untitled',
     description: course.description || '',
     slug: course.slug || null,
@@ -347,12 +580,57 @@ export async function upsertCourse(course = {}) {
     tree_json: course.tree_json || course.tree || {},
     updated_at: nowIso(),
   };
-  const options = isUuid(course.id) ? { onConflict: 'id' } : {};
-  // Attempt created_by; if column missing, retry with owner_id
-  let { data, error } = await upsert(tableNameCourses(), { ...base, created_by: user.id }, options);
-  if (error && hasColumnError(error, 'created_by', tableNameCourses())) {
-    const res = await upsert(tableNameCourses(), { ...base, owner_id: user.id }, options);
+  // Only include id if it's a valid UUID (for updates)
+  if (course.id && isUuid(course.id)) {
+    base.id = course.id;
+  }
+  // Strategy: select by slug first. If exists and owned by user → update. If exists but not owned → generate a new slug and insert. Else → insert.
+  const hasSlug = !!base.slug;
+  let data = null; let error = null;
+  if (hasSlug) {
+    const { data: existing, error: selErr } = await c.from(tableNameCourses()).select('*').eq('slug', base.slug).limit(1).maybeSingle();
+    if (!selErr && existing) {
+      const owned = (existing.created_by === user.id) || (existing.owner_id === user.id);
+      if (owned) {
+        const upd = await c.from(tableNameCourses()).update({ ...base, created_by: user.id }).eq('id', existing.id).select('*').maybeSingle();
+        data = upd.data ? [upd.data] : null; error = upd.error || null;
+        if (error && hasColumnError(error, 'created_by', tableNameCourses())) {
+          const upd2 = await c.from(tableNameCourses()).update({ ...base, owner_id: user.id }).eq('id', existing.id).select('*').maybeSingle();
+          data = upd2.data ? [upd2.data] : null; error = upd2.error || null;
+        }
+      } else {
+        // Collision with someone else's slug: generate a fresh slug and insert
+        const clean = (course.title ? String(course.title) : 'untitled').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        base.slug = `${clean}-${Math.random().toString(36).slice(2, 10)}`;
+        let ins = await c.from(tableNameCourses()).insert({ ...base, created_by: user.id }).select('*');
+        data = ins.data; error = ins.error;
+        if (error && hasColumnError(error, 'created_by', tableNameCourses())) {
+          ins = await c.from(tableNameCourses()).insert({ ...base, owner_id: user.id }).select('*');
+          data = ins.data; error = ins.error;
+        }
+      }
+    } else if (!selErr) {
+      // No existing slug: insert
+      let ins = await c.from(tableNameCourses()).insert({ ...base, created_by: user.id }).select('*');
+      data = ins.data; error = ins.error;
+      if (error && hasColumnError(error, 'created_by', tableNameCourses())) {
+        ins = await c.from(tableNameCourses()).insert({ ...base, owner_id: user.id }).select('*');
+        data = ins.data; error = ins.error;
+      }
+    } else {
+      // Selection error → attempt insert
+      let ins = await c.from(tableNameCourses()).insert({ ...base, created_by: user.id }).select('*');
+      data = ins.data; error = ins.error;
+    }
+  } else {
+    // No slug provided: upsert by id
+    const options = { onConflict: 'id' };
+    let res = await upsert(tableNameCourses(), { ...base, created_by: user.id }, options);
     data = res.data; error = res.error;
+    if (error && hasColumnError(error, 'created_by', tableNameCourses())) {
+      const res2 = await upsert(tableNameCourses(), { ...base, owner_id: user.id }, options);
+      data = res2.data; error = res2.error;
+    }
   }
   if (error) {
     const msg = String(error.message || '').toLowerCase();
@@ -372,7 +650,7 @@ export async function upsertCourse(course = {}) {
       return { id: Array.isArray(legacyData) && legacyData[0] ? legacyData[0].id : legacyPayload.id || null, error: legacyErr };
     }
   }
-  return { id: Array.isArray(data) && data[0] ? data[0].id : (isUuid(course.id) ? course.id : null), error };
+  return { id: Array.isArray(data) && data[0] ? data[0].id : base.id, error };
 }
 
 export async function deleteCourse(id) {

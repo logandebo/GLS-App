@@ -9,6 +9,8 @@ import { isUniqueLessonId, validateVideoConfig, validateUnityConfig, validateQui
 let builtInConcepts = [];
 let customConceptsCache = [];
 let customLessonsCache = [];
+let _refreshConceptSelectInProgress = false;
+let _searchDebounceTimer = null;
 
 let draft = {
   conceptId: '',
@@ -25,6 +27,7 @@ let draft = {
   }
 };
 let unityPlaceholderWarned = false;
+let _sbDraftId = null;
 
 function slugify(text) {
   return String(text || '')
@@ -34,6 +37,37 @@ function slugify(text) {
     .replace(/-+/g, '-')
     .replace(/(^-)|(-$)/g, '')
     .slice(0, 40);
+}
+
+export function extractYouTubeId(input) {
+  if (!input) return "";
+  const s = input.trim();
+
+  // Raw ID (11 characters) - most common format
+  if (/^[a-zA-Z0-9_-]{11}$/.test(s)) return s;
+
+  try {
+    const url = new URL(s);
+    
+    // youtu.be/<id>
+    if (url.hostname.includes("youtu.be")) {
+      return url.pathname.replace("/", "");
+    }
+    
+    // youtube.com/watch?v=<id>
+    if (url.hostname.includes("youtube.com")) {
+      const v = url.searchParams.get("v");
+      if (v) return v;
+      
+      // /embed/<id>
+      const embedMatch = url.pathname.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
+      if (embedMatch) return embedMatch[1];
+    }
+  } catch {
+    // Not a URL, ignore
+  }
+  
+  return "";
 }
 
 function generateLessonId() {
@@ -75,59 +109,101 @@ function setStep(step) {
   });
 }
 
-function refreshConceptSelect() {
-  const select = document.getElementById('lc-conceptSelect');
-  const searchEl = document.getElementById('lc-conceptSearch');
-  if (!select) return;
-  const current = select.value;
-  select.innerHTML = '';
-  const byId = new Map();
-  [...builtInConcepts, ...customConceptsCache].forEach(c => { if (c && c.id) byId.set(c.id, c); });
-  const term = (searchEl && searchEl.value || '').trim().toLowerCase();
-  const list = Array.from(byId.values()).filter(c => {
-    if (!term) return true;
-    const title = (c.title || '').toLowerCase();
-    const id = (c.id || '').toLowerCase();
-    const subj = (c.subject || c.primaryDomain || '').toLowerCase();
-    const tags = Array.isArray(c.tags) ? c.tags.join(' ').toLowerCase() : '';
-    return title.includes(term) || id.includes(term) || subj.includes(term) || tags.includes(term);
-  }).sort((a,b) => (a.title||a.id).localeCompare(b.title||b.id));
-  list.forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c.id;
-    opt.textContent = c.title || c.id;
-    if (c.isCustom) opt.textContent += ' (custom)';
-    select.appendChild(opt);
-  });
-  // Restore selection if still present after filter
-  if (current && Array.from(select.options).some(o => o.value === current)) {
-    select.value = current;
-  } else {
-    // If filtered out, clear selection
-    select.value = '';
+async function refreshConceptSelect() {
+  if (_refreshConceptSelectInProgress) return;
+  _refreshConceptSelectInProgress = true;
+
+  try {
+    const select = document.getElementById('lc-conceptSelect');
+    const searchEl = document.getElementById('lc-conceptSearch');
+    if (!select) return;
+
+    const current = select.value;
+
+    // Clear dropdown before repopulating (single rebuild)
+    select.innerHTML = '';
+    
+    // Add default placeholder option
+    const placeholderOpt = document.createElement('option');
+    placeholderOpt.value = '';
+    placeholderOpt.textContent = 'Select a concept...';
+    placeholderOpt.disabled = true;
+    placeholderOpt.selected = true;
+    select.appendChild(placeholderOpt);
+
+    // Load concepts from Supabase
+    const { listConcepts } = await import('./dataStore.js');
+    const { concepts, error } = await listConcepts();
+    if (error || !Array.isArray(concepts)) {
+      console.error('Error loading concepts from Supabase:', error);
+      return;
+    }
+
+    // Single dedupe pass by UUID (c.id is the primary key)
+    const unique = new Map();
+    for (const c of concepts) {
+      const id = c?.id;  // Use the database UUID as the canonical ID
+      if (!id || unique.has(id)) continue;
+
+      unique.set(id, {
+        id,  // This is the UUID from the database
+        title: c?.title || id,
+        subject: c?.content?.domain || 'general',
+        summary: c?.summary || '',
+        tags: c?.tags || [],
+        estimatedMinutesToBasicMastery: 20,
+        isCustom: true,
+        createdBy: c?.owner_id
+      });
+    }
+
+    const cache = Array.from(unique.values());
+
+    // Filter using the search term (no second dedupe)
+    const term = (searchEl?.value || '').trim().toLowerCase();
+    const filtered = !term ? cache : cache.filter(cc => {
+      const title = (cc.title || '').toLowerCase();
+      const id = (cc.id || '').toLowerCase();
+      const subj = (cc.subject || '').toLowerCase();
+      const tags = Array.isArray(cc.tags) ? cc.tags.join(' ').toLowerCase() : '';
+      return title.includes(term) || id.includes(term) || subj.includes(term) || tags.includes(term);
+    });
+
+    // Sort stable, user-friendly
+    filtered.sort((a, b) => (a.title || a.id).localeCompare(b.title || b.id));
+
+    // Populate dropdown
+    for (const cc of filtered) {
+      const opt = document.createElement('option');
+      opt.value = cc.id;
+      opt.textContent = cc.title || cc.id;
+      if (cc.isCustom) opt.textContent += ' (custom)';
+      select.appendChild(opt);
+    }
+
+    // Restore selection if still present
+    if (current && Array.from(select.options).some(o => o.value === current)) {
+      select.value = current;
+    }
+  } catch (e) {
+    console.error('Error in refreshConceptSelect:', e);
+  } finally {
+    _refreshConceptSelectInProgress = false;
   }
 }
 
 function validateConceptSelection() {
   const errors = document.getElementById('lc-conceptErrors');
   const select = document.getElementById('lc-conceptSelect');
-  const idEl = document.getElementById('lc-conceptId');
   const titleEl = document.getElementById('lc-conceptTitle');
   errors.textContent = '';
-  const existing = select.value;
-  const newId = idEl.value.trim();
-  const newTitle = titleEl.value.trim();
-  if (!existing && (!newId || !newTitle)) {
-    errors.textContent = 'Select existing concept or provide ID and Title.';
+  const existing = select?.value;
+  const newTitle = titleEl?.value?.trim() || '';
+  
+  // Valid if either a concept is selected OR a new title is provided
+  if (!existing && !newTitle) {
+    errors.textContent = 'Select existing concept or provide a Title for new concept.';
     return false;
-  }
-  if (newId) {
-    const existsInBuiltIn = (builtInConcepts || []).some(c => c && c.id === newId);
-    const existsInCustom = (customConceptsCache || []).some(c => c && c.id === newId);
-    if (existsInBuiltIn || existsInCustom) {
-      errors.textContent = 'Concept ID already exists.';
-      return false;
-    }
   }
   return true;
 }
@@ -140,37 +216,68 @@ function validateNewConceptFields(){
   const newId = idEl.value.trim();
   const newTitle = titleEl.value.trim();
   if (!newId || !newTitle){ errors.textContent = 'Provide Concept ID and Title to add a concept.'; return false; }
-  const existsInBuiltIn = (builtInConcepts || []).some(c => c && c.id === newId);
+  // Only check against Supabase concepts (customConceptsCache)
   const existsInCustom = (customConceptsCache || []).some(c => c && c.id === newId);
-  if (existsInBuiltIn || existsInCustom){ errors.textContent = 'Concept ID already exists.'; return false; }
+  if (existsInCustom){ errors.textContent = 'Concept ID already exists.'; return false; }
   return true;
 }
 
-function saveConceptIfNeeded(forceNew = false) {
+async function saveConceptIfNeeded(forceNew = false) {
   const select = document.getElementById('lc-conceptSelect');
-  const idEl = document.getElementById('lc-conceptId');
   const titleEl = document.getElementById('lc-conceptTitle');
   const subjEl = document.getElementById('lc-conceptSubject');
   const thumbEl = document.getElementById('lc-conceptThumb');
   if (!forceNew && select.value) return select.value;
-  const id = idEl.value.trim();
   const title = titleEl.value.trim();
-  if (!id || !title) return '';
+  if (!title) return '';
+  // Auto-generate ID from title
+  const id = 'custom-' + slugify(title);
   const subj = subjEl.value.trim();
   const minutes = 20; // default mastery minutes (no longer user-specified here)
   const thumb = thumbEl.value.trim();
-  const concept = { id, title, subject: subj, estimatedMinutesToBasicMastery: minutes, isCustom: true };
+  const concept = { 
+    id, 
+    title, 
+    subject: subj || 'general',
+    domain: subj || 'general',
+    estimatedMinutesToBasicMastery: minutes, 
+    isCustom: true 
+  };
   if (thumb) concept.thumbnail = thumb;
-  const idx = customConceptsCache.findIndex(c => c.id === id);
-  if (idx >= 0) customConceptsCache[idx] = concept; else customConceptsCache.push(concept);
-  saveCustomConcepts(customConceptsCache);
-  refreshConceptSelect();
-  // Auto-select newly added concept in dropdown and enable next
-  select.value = id;
-  const to2 = document.getElementById('lc-toStep2');
-  if (to2) to2.disabled = false;
-  showToast('Concept added');
-  return id;
+  
+  // Save to Supabase
+  try {
+    const { upsertConcept } = await import('./dataStore.js');
+    const { ok, data, error } = await upsertConcept(concept);
+    if (!ok || error) {
+      console.error('Failed to save concept to Supabase:', error);
+      showToast('Failed to save concept to database', 'error');
+      return '';
+    }
+    // Use the actual UUID from the database (data.id is the primary key)
+    const conceptId = data?.id || '';
+    if (!conceptId) {
+      console.error('Concept saved but no ID returned');
+      showToast('Concept saved but ID missing', 'error');
+      return '';
+    }
+    
+    // Update concept with actual UUID for local cache
+    concept.id = conceptId;
+    const idx = customConceptsCache.findIndex(c => c.id === conceptId);
+    if (idx >= 0) customConceptsCache[idx] = concept; else customConceptsCache.push(concept);
+    refreshConceptSelect();
+    // Auto-select newly added concept in dropdown and enable next
+    select.value = conceptId;
+    const to2 = document.getElementById('lc-toStep2');
+    if (to2) to2.disabled = false;
+    showToast('Concept added');
+    return conceptId;
+  } catch (e) {
+    console.error('Error saving concept:', e);
+    showToast('Failed to save concept', 'error');
+    return '';
+  }
 }
 
 function validateBasics() {
@@ -191,85 +298,286 @@ function buildContentForm(type) {
   if (type === 'video') {
     panel.innerHTML = `
       <div class="grid-two">
-        <label>Video URL <input id="lc-videoUrlInput" type="url" placeholder="e.g. /assets/video/my.mp4 or https://..." /></label>
-        <div class="upload-field">
+        <label>Video Source
+          <select id="lc-videoSource">
+            <option value="youtube">YouTube (Recommended - Free CDN)</option>
+            <option value="direct">Direct Upload (Supabase)</option>
+            <option value="external">External URL</option>
+          </select>
+        </label>
+      </div>
+      
+      <!-- YouTube Panel -->
+      <div id="lc-youtubePanel" class="card" style="margin-top:0.75rem;">
+        <strong>YouTube Video</strong>
+        <label style="margin-top:0.5rem;">YouTube URL or Video ID
+          <input id="lc-youtubeInput" type="text" placeholder="dQw4w9WgXcQ or https://youtube.com/watch?v=..." />
+        </label>
+        <button type="button" id="lc-youtubePreview" class="btn secondary" style="margin-top:0.5rem">Preview</button>
+        <div id="lc-youtubeEmbed" style="margin-top:0.75rem;"></div>
+        <p class="hint-text muted">Paste a YouTube video ID or full URL. Uses privacy-enhanced embed (no cookies).</p>
+      </div>
+      
+      <!-- Direct Upload Panel -->
+      <div id="lc-directUploadPanel" class="card hidden" style="margin-top:0.75rem;">
+        <strong>Direct Upload</strong>
+        <div class="upload-field" style="margin-top:0.5rem;">
           <label>Upload Video File
             <input id="lc-videoFileInput" type="file" accept="video/*" />
           </label>
           <button type="button" id="lc-uploadVideoBtn" class="btn secondary" style="margin-top:0.5rem">Upload & Use</button>
           <p id="lc-uploadStatus" class="hint-text"></p>
-          <p class="hint-text muted">Max ~2GB per file. Supported: MP4, WebM, OGG, MOV.</p>
+          <p class="hint-text muted">Max ~2GB per file. Supported: MP4, WebM, OGG, MOV. Uses Supabase Storage (limited).</p>
         </div>
+      </div>
+      
+      <!-- External URL Panel -->
+      <div id="lc-externalUrlPanel" class="card hidden" style="margin-top:0.75rem;">
+        <strong>External URL</strong>
+        <label style="margin-top:0.5rem;">Video URL
+          <input id="lc-videoUrlInput" type="url" placeholder="https://example.com/video.mp4" />
+        </label>
+        <p class="hint-text muted">Direct link to video file (MP4, WebM, OGG).</p>
       </div>`;
+    
+    // Source selector handler
+    const sourceSelect = document.getElementById('lc-videoSource');
+    const youtubePanel = document.getElementById('lc-youtubePanel');
+    const directPanel = document.getElementById('lc-directUploadPanel');
+    const externalPanel = document.getElementById('lc-externalUrlPanel');
+    
+    sourceSelect && sourceSelect.addEventListener('change', () => {
+      const source = sourceSelect.value;
+      youtubePanel.classList.toggle('hidden', source !== 'youtube');
+      directPanel.classList.toggle('hidden', source !== 'direct');
+      externalPanel.classList.toggle('hidden', source !== 'external');
+      validateContent();
+    });
+    
+    // YouTube preview handler
+    const youtubeInput = document.getElementById('lc-youtubeInput');
+    const youtubePreviewBtn = document.getElementById('lc-youtubePreview');
+    const youtubeEmbed = document.getElementById('lc-youtubeEmbed');
+    
+    youtubeInput && youtubeInput.addEventListener('input', validateContent);
+    
+    youtubePreviewBtn && youtubePreviewBtn.addEventListener('click', () => {
+      const input = youtubeInput.value.trim();
+      const videoId = extractYouTubeId(input);
+      
+      if (!videoId) {
+        youtubeEmbed.innerHTML = '<p class="error-text">Invalid YouTube URL or ID</p>';
+        return;
+      }
+      
+      youtubeEmbed.innerHTML = `
+        <iframe 
+          src="https://www.youtube-nocookie.com/embed/${videoId}" 
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          referrerpolicy="strict-origin-when-cross-origin"
+          allowfullscreen
+          style="width:100%; aspect-ratio:16/9; border:0; border-radius:6px;">
+        </iframe>`;
+    });
+    
+    // External URL handler
     const urlInp = document.getElementById('lc-videoUrlInput');
     urlInp && urlInp.addEventListener('input', validateContent);
     const fileInp = document.getElementById('lc-videoFileInput');
     const uploadBtn = document.getElementById('lc-uploadVideoBtn');
     const statusEl = document.getElementById('lc-uploadStatus');
     if (uploadBtn) {
-      uploadBtn.addEventListener('click', () => {
-        statusEl.textContent = 'Uploads are not supported on GitHub Pages. Host your video (e.g., in assets/video) and paste the URL above.';
+      uploadBtn.addEventListener('click', async () => {
+        const file = fileInp && fileInp.files && fileInp.files[0] ? fileInp.files[0] : null;
+        if (!file) { statusEl.textContent = 'Choose a file first.'; return; }
+        // Gate by Supabase availability
+        if (!(window.supabaseClient && window.supabaseClient.isConfigured && window.supabaseClient.isConfigured())) {
+          statusEl.textContent = 'Uploads require Supabase configured + signed-in. Paste a URL instead.'; return;
+        }
+        const { data } = await window.supabaseClient.getSession();
+        const user = data && data.session ? data.session.user : null;
+        if (!user) { statusEl.textContent = 'Sign in to enable uploads.'; return; }
+        // Lazily create a draft if not yet initialized
+        if (!_sbDraftId) {
+          statusEl.textContent = 'Preparing draft…';
+          try {
+            const ok = await window.supabaseClient.waitForSessionReady?.(2000, 150);
+            if (!ok) { statusEl.textContent = 'Session not ready. Try again.'; return; }
+            const { createLessonDraft } = await import('./dataStore.js');
+            const { lesson, error } = await createLessonDraft({
+              title: draft?.lesson?.title || 'Untitled Lesson',
+              description: draft?.lesson?.description || '',
+              type: 'video',
+              payload: draft?.lesson?.contentConfig || {}
+            });
+            if (error || !lesson?.id) { statusEl.textContent = 'Draft creation failed. Try again.'; return; }
+            _sbDraftId = lesson.id;
+          } catch {
+            statusEl.textContent = 'Draft creation error. Try again.';
+            return;
+          }
+        }
+        uploadBtn.disabled = true; statusEl.textContent = 'Uploading…';
+        try {
+          const sup = window.supabaseClient._raw;
+          const bucket = sup.storage.from('lesson-content');
+          const ts = Date.now();
+          const safeName = (file.name || 'video').replace(/[^a-zA-Z0-9._-]/g, '_');
+          const path = `lessons/${_sbDraftId}/video/${ts}_${safeName}`;
+          const { error } = await bucket.upload(path, file, { upsert: true, contentType: file.type || 'video/mp4' });
+          if (error) { statusEl.textContent = 'Upload failed.'; return; }
+          // Persist storagePath on draft payload
+          draft.lesson.contentConfig.video = { storagePath: path, url: '' };
+          await updateDraftPayload();
+          statusEl.textContent = 'Uploaded. Preview will use signed URL at runtime.';
+          urlInp && (urlInp.value = '');
+          validateContent();
+        } catch (e) {
+          statusEl.textContent = 'Upload error.';
+        } finally {
+          uploadBtn.disabled = false;
+        }
       });
     }
     validateContent();
   } else if (type === 'unity_game') {
     panel.innerHTML = `
-      <div class="grid-two">
-        <label>Unity Build URL
-          <input id="lc-unityUrlInput" type="url" placeholder="e.g. /UnityBuilds/ScaleTrainerV2WebGL/index.html" />
-        </label>
-        <div style="display:flex; gap:0.5rem; align-items:flex-end;">
-          <button id="lc-unityOpenBtn" type="button" class="btn secondary">Open URL</button>
-          <button id="lc-unityCheckBtn" type="button" class="btn secondary">Check URL</button>
+      <div class="card" style="margin-bottom:0.75rem;">
+        <strong>Upload Unity WebGL Build</strong>
+        <p class="hint-text muted">Select the folder containing your Unity WebGL build (index.html, Build/, TemplateData/).</p>
+        <div style="margin-top:0.5rem;">
+          <label>Select Unity Build Folder
+            <input id="lc-unityFolderInput" type="file" webkitdirectory directory multiple style="margin-top:0.5rem;" />
+          </label>
+          <button type="button" id="lc-uploadUnityBtn" class="btn" style="margin-top:0.75rem;">Upload to Cloud Storage</button>
+          <p id="lc-unityUploadStatus" class="hint-text"></p>
         </div>
       </div>
-      <div class="divider">Upload Guide</div>
-      <div class="review-summary" style="font-size:0.75rem;">
-        <strong>Place your WebGL build here:</strong>
-        <div style="margin:0.35rem 0;">
-          UnityBuilds/YourBuildName/
-          <br/> ├─ Build/ (contains .wasm/.data/.framework.js/.loader.js or .unityweb)
-          <br/> ├─ TemplateData/
-          <br/> └─ StreamingAssets/ (if used)
+      
+      <div class="divider">OR use existing URL</div>
+      
+      <div class="grid-two">
+        <label>Unity Build URL (optional)
+          <input id="lc-unityUrlInput" type="url" placeholder="https://cdn.example.com/unity/build/index.html" />
+        </label>
+        <div style="display:flex; gap:0.5rem; align-items:flex-end;">
+          <button id="lc-unityOpenBtn" type="button" class="btn secondary">Test URL</button>
         </div>
-        <strong>Then set the URL to:</strong>
-        <div style="margin:0.35rem 0; color:#93c5fd;">/UnityBuilds/YourBuildName/index.html</div>
-        Notes:
+      </div>
+      
+      <div class="review-summary" style="font-size:0.75rem; margin-top:0.75rem;">
+        <strong>Unity Build Requirements:</strong>
         <ul style="margin:0.35rem 0 0.15rem 1rem; padding:0;">
-          <li>Server serves Unity assets with correct types (.wasm/.data/.unityweb, .br/.gz).</li>
-          <li>Use Chrome/Edge. Keep relative paths from the generated index.html intact.</li>
-          <li>If you see a blank frame, try opening the URL directly to debug console errors.</li>
+          <li>Must contain index.html at root level</li>
+          <li>Build/ folder with .wasm, .data, .framework.js, .loader.js</li>
+          <li>Compressed files (.br, .gz) are supported</li>
+          <li>Upload preserves folder structure automatically</li>
         </ul>
       </div>
     `;
-    const inp = document.getElementById('lc-unityUrlInput');
-    inp && inp.addEventListener('input', validateContent);
-    // Open URL in a new tab for quick manual verification
+    
+    const folderInput = document.getElementById('lc-unityFolderInput');
+    const uploadBtn = document.getElementById('lc-uploadUnityBtn');
+    const statusEl = document.getElementById('lc-unityUploadStatus');
+    const urlInput = document.getElementById('lc-unityUrlInput');
+    
+    urlInput && urlInput.addEventListener('input', validateContent);
+    
+    if (uploadBtn) {
+      uploadBtn.addEventListener('click', async () => {
+        const files = folderInput && folderInput.files ? folderInput.files : null;
+        if (!files || files.length === 0) {
+          statusEl.textContent = 'Please select a Unity build folder first.';
+          return;
+        }
+        
+        // Verify folder contains index.html
+        const hasIndexHtml = Array.from(files).some(f => 
+          f.webkitRelativePath.endsWith('/index.html') || f.name === 'index.html'
+        );
+        if (!hasIndexHtml) {
+          statusEl.textContent = 'Error: Selected folder must contain index.html';
+          return;
+        }
+        
+        // Check authentication
+        if (!(window.supabaseClient && window.supabaseClient.isConfigured && window.supabaseClient.isConfigured())) {
+          statusEl.textContent = 'Uploads require Supabase configured + signed-in.';
+          return;
+        }
+        
+        const { data } = await window.supabaseClient.getSession();
+        const user = data && data.session ? data.session.user : null;
+        if (!user) {
+          statusEl.textContent = 'Sign in to enable uploads.';
+          return;
+        }
+        
+        // Ensure lesson has an ID
+        ensureLessonId();
+        const lessonId = draft.lesson.id;
+        
+        // Prepare form data
+        uploadBtn.disabled = true;
+        statusEl.textContent = `Uploading ${files.length} files...`;
+        
+        try {
+          const { SUPABASE_URL } = await import('./config.js');
+          const endpoint = `${SUPABASE_URL}/functions/v1/upload_unity_build`;
+          
+          const formData = new FormData();
+          formData.append('lesson_id', lessonId);
+          
+          // Add all files with their relative paths
+          for (const file of files) {
+            formData.append('files', file, file.webkitRelativePath || file.name);
+          }
+          
+          const accessToken = data.session.access_token;
+          const resp = await fetch(endpoint, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${accessToken}` },
+            body: formData
+          });
+          
+          if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(`Upload failed: ${resp.status} ${text}`);
+          }
+          
+          const result = await resp.json();
+          
+          // Store in lesson config
+          draft.lesson.contentConfig.unity_game = {
+            source: 'r2',
+            r2Key: result.prefixKey,
+            url: result.indexUrl
+          };
+          
+          statusEl.textContent = `✓ Uploaded successfully! Build available at: ${result.indexUrl}`;
+          statusEl.style.color = 'var(--success-color, #10b981)';
+          
+          // Clear URL input since we now have R2 upload
+          if (urlInput) urlInput.value = '';
+          
+          validateContent();
+        } catch (error) {
+          statusEl.textContent = `Upload error: ${error.message}`;
+          statusEl.style.color = 'var(--error-color, #ef4444)';
+        } finally {
+          uploadBtn.disabled = false;
+        }
+      });
+    }
+    
+    // Test URL button opens Unity build in new tab
     const openBtn = document.getElementById('lc-unityOpenBtn');
     openBtn && openBtn.addEventListener('click', () => {
       const url = (document.getElementById('lc-unityUrlInput')?.value || '').trim();
       if (!url) { showToast('Enter a Unity build URL first.', 'error'); return; }
       try { window.open(url, '_blank'); } catch {}
     });
-    // HEAD check for quick availability signal
-    const checkBtn = document.getElementById('lc-unityCheckBtn');
-    checkBtn && checkBtn.addEventListener('click', async () => {
-      const url = (document.getElementById('lc-unityUrlInput')?.value || '').trim();
-      if (!url) { showToast('Enter a Unity build URL first.', 'error'); return; }
-      checkBtn.disabled = true;
-      try {
-        const resp = await fetch(url, { method: 'HEAD' });
-        if (resp.ok) {
-          showToast('Unity URL is reachable (HTTP ' + resp.status + ')', 'success');
-        } else {
-          showToast('Unity URL responded with HTTP ' + resp.status, 'error');
-        }
-      } catch (e) {
-        showToast('Failed to reach Unity URL', 'error');
-      } finally {
-        checkBtn.disabled = false;
-      }
-    });
+    
     validateContent();
   } else if (type === 'quiz') {
     panel.innerHTML = '<div id="lc-quizBuilder"></div><button type="button" id="lc-addQuizQuestion" class="btn secondary">Add Question</button>';
@@ -548,20 +856,73 @@ function validateContent() {
   const nextBtn = document.getElementById('lc-toStep4');
   errors.textContent = '';
   let ok = true;
+  
   if (draft.lesson.type === 'video') {
-    const url = document.getElementById('lc-videoUrlInput').value.trim();
-    ok = validateVideoConfig(url);
-    if (ok) draft.lesson.contentConfig.video = { url };
+    const sourceSelect = document.getElementById('lc-videoSource');
+    const source = sourceSelect ? sourceSelect.value : 'direct';
+    
+    if (source === 'youtube') {
+      const youtubeInput = document.getElementById('lc-youtubeInput');
+      const input = youtubeInput ? youtubeInput.value.trim() : '';
+      const videoId = extractYouTubeId(input);
+      
+      if (!videoId) {
+        errors.textContent = 'Please provide a valid YouTube video ID or URL.';
+        ok = false;
+      } else {
+        draft.lesson.contentConfig.video = {
+          source: 'youtube',
+          youtubeUrl: input
+        };
+      }
+    } else if (source === 'direct') {
+      // Check if already uploaded (storagePath set)
+      const hasStoragePath = draft.lesson.contentConfig.video?.storagePath;
+      if (!hasStoragePath) {
+        errors.textContent = 'Please upload a video file using the Upload button.';
+        ok = false;
+      }
+      // Keep existing video config with storagePath
+    } else if (source === 'external') {
+      const urlInput = document.getElementById('lc-videoUrlInput');
+      const url = urlInput ? urlInput.value.trim() : '';
+      
+      ok = validateVideoConfig(url);
+      if (ok) {
+        draft.lesson.contentConfig.video = {
+          source: 'external',
+          url
+        };
+      } else {
+        errors.textContent = 'Please provide a valid video URL (MP4, WebM, OGG).';
+      }
+    }
   } else if (draft.lesson.type === 'unity_game') {
-    const url = document.getElementById('lc-unityUrlInput').value.trim();
-    if (url) {
-      ok = validateUnityConfig(url);
-      if (ok) draft.lesson.contentConfig.unity_game = { url, unityBuildUrlIsPlaceholder: false };
-    } else {
-      // Allow proceed with placeholder
+    // Check if R2 upload exists
+    const hasR2Upload = draft.lesson.contentConfig.unity_game?.source === 'r2' && 
+                        draft.lesson.contentConfig.unity_game?.url;
+    
+    const urlInput = document.getElementById('lc-unityUrlInput');
+    const url = urlInput ? urlInput.value.trim() : '';
+    
+    if (hasR2Upload) {
+      // R2 upload takes precedence
       ok = true;
-      draft.lesson.contentConfig.unity_game = { url: '', unityBuildUrlIsPlaceholder: true };
-      if (!unityPlaceholderWarned) { showToast('No Unity build URL provided — using placeholder for testing.', 'warning'); unityPlaceholderWarned = true; }
+    } else if (url) {
+      // External URL provided
+      ok = validateUnityConfig(url);
+      if (ok) {
+        draft.lesson.contentConfig.unity_game = {
+          source: 'external',
+          url
+        };
+      } else {
+        errors.textContent = 'Please provide a valid Unity build URL (must point to index.html).';
+      }
+    } else {
+      // No URL and no R2 upload
+      errors.textContent = 'Please upload a Unity build folder or provide a build URL.';
+      ok = false;
     }
   } else if (draft.lesson.type === 'quiz') {
     const quiz = draft.lesson.contentConfig.quiz;
@@ -687,7 +1048,7 @@ function buildReview() {
   publishBtn.disabled = false;
 }
 
-function publishLesson() {
+async function publishLesson() {
   // Guarantee an auto-generated ID before persisting
   ensureLessonId();
   try {
@@ -698,10 +1059,47 @@ function publishLesson() {
   } catch {}
   customLessonsCache.push(draft.lesson);
   saveCustomLessons(customLessonsCache);
-  showToast('Lesson published');
+  
+  // Supabase: create published lesson directly (no drafts)
+  let supabaseSuccess = false;
+  if (window.supabaseClient && window.supabaseClient.isConfigured && window.supabaseClient.isConfigured()) {
+    try {
+      const payload = buildSupabasePayloadFromDraft();
+      // Creating published lesson
+      
+      // Create lesson directly as published (no drafts)
+      const { createLessonDraft } = await import('./dataStore.js');
+      const { lesson, error } = await createLessonDraft({ 
+        ...payload, 
+        is_published: true, 
+        is_public: true 
+      });
+      if (error) {
+        console.error('[PUBLISH] Create failed:', error);
+        localStorage.setItem('gls_last_publish_error', JSON.stringify({ step: 'create', error: error.message || String(error), time: new Date().toISOString() }));
+      } else if (lesson?.id) {
+        // Publish successful
+        supabaseSuccess = true;
+        localStorage.setItem('gls_last_publish_success', JSON.stringify({ step: 'create', id: lesson.id, time: new Date().toISOString() }));
+      } else {
+        console.error('[PUBLISH] Create returned no lesson');
+        localStorage.setItem('gls_last_publish_error', JSON.stringify({ step: 'create', error: 'No lesson returned', time: new Date().toISOString() }));
+      }
+    } catch (e) {
+      console.error('[PUBLISH] Supabase publish failed:', e);
+      localStorage.setItem('gls_last_publish_error', JSON.stringify({ step: 'exception', error: e.message || String(e), time: new Date().toISOString() }));
+    }
+  } else {
+    console.warn('[PUBLISH] Supabase not configured, saving locally only');
+    localStorage.setItem('gls_last_publish_error', JSON.stringify({ step: 'config', error: 'Supabase not configured', time: new Date().toISOString() }));
+  }
+  
+  showToast(supabaseSuccess ? 'Lesson published to cloud' : 'Lesson published locally');
+  
   // Refresh the page to reset the wizard state cleanly
+  // **Wait to allow DB operations to complete and user to see logs**
   try {
-    setTimeout(() => { window.location.reload(); }, 300);
+    setTimeout(() => { window.location.reload(); }, 1500);
   } catch {
     // Fallback if reload is blocked; reset the wizard
     resetWizard();
@@ -710,7 +1108,7 @@ function publishLesson() {
 
 function resetWizard() {
   draft = { conceptId: '', lesson: { id:'', conceptId:'', title:'', description:'', minutes:5, difficulty:'beginner', xpReward:10, type:'video', contentConfig:{} } };
-  ['lc-conceptId','lc-conceptTitle','lc-conceptSubject','lc-conceptMinutes','lc-conceptThumb','lc-lessonId','lc-lessonTitle','lc-lessonDesc','lc-lessonMinutes','lc-lessonXp'].forEach(id => { const el = document.getElementById(id); if (el) el.value=''; });
+  ['lc-conceptTitle','lc-conceptSubject','lc-conceptThumb','lc-lessonId','lc-lessonTitle','lc-lessonDesc','lc-lessonMinutes','lc-lessonXp'].forEach(id => { const el = document.getElementById(id); if (el) el.value=''; });
   document.getElementById('lc-lessonDifficulty').value = 'beginner';
   document.getElementById('lc-lessonType').value = 'video';
   document.getElementById('lc-contentConfigPanel').innerHTML = '';
@@ -731,29 +1129,74 @@ function bindEvents(username) {
   const back2 = document.getElementById('lc-backTo2');
   const back3 = document.getElementById('lc-backTo3');
 
-  ['lc-conceptSelect','lc-conceptId','lc-conceptTitle'].forEach(id => {
-    const el = document.getElementById(id);
-    el && el.addEventListener('input', () => {
-      const valid = validateConceptSelection();
-      to2.disabled = !valid;
-    });
+  console.log('[bindEvents] STARTING - to2 button exists?', !!to2);
+  console.log('[bindEvents] to2 element:', to2);
+  console.log('[bindEvents] to2 disabled?', to2?.disabled);
+
+  // Listen for both 'change' (select) and 'input' (text field) events
+  const conceptSelect = document.getElementById('lc-conceptSelect');
+  const conceptTitle = document.getElementById('lc-conceptTitle');
+  
+  console.log('[bindEvents] conceptSelect exists?', !!conceptSelect);
+  console.log('[bindEvents] conceptSelect value:', conceptSelect?.value);
+  console.log('[bindEvents] conceptTitle exists?', !!conceptTitle);
+  
+  conceptSelect && conceptSelect.addEventListener('change', () => {
+    console.log('[SELECT CHANGE] Dropdown changed to:', conceptSelect.value);
+    const valid = validateConceptSelection();
+    console.log('[SELECT CHANGE] Validation result:', valid);
+    console.log('[SELECT CHANGE] Setting to2.disabled =', !valid);
+    to2.disabled = !valid;
+    console.log('[SELECT CHANGE] to2.disabled is now:', to2.disabled);
   });
-  conceptSaveBtn && conceptSaveBtn.addEventListener('click', () => {
+  
+  console.log('[bindEvents] Attached change listener to conceptSelect');
+  
+  conceptTitle && conceptTitle.addEventListener('input', () => {
+    console.log('[TITLE INPUT] Title field changed to:', conceptTitle.value);
+    const valid = validateConceptSelection();
+    console.log('[TITLE INPUT] Validation result:', valid);
+    to2.disabled = !valid;
+  });
+  conceptSaveBtn && conceptSaveBtn.addEventListener('click', async () => {
     // Explicitly add a new concept, even if an existing one is selected
     if (!validateNewConceptFields()) return;
-    const id = saveConceptIfNeeded(true);
+    const id = await saveConceptIfNeeded(true);
     if (id) { draft.conceptId = id; draft.lesson.conceptId = id; }
   });
   conceptSearch && conceptSearch.addEventListener('input', () => {
-    refreshConceptSelect();
+    clearTimeout(_searchDebounceTimer);
+    _searchDebounceTimer = setTimeout(() => {
+      refreshConceptSelect();
+    }, 300);
   });
-  to2 && to2.addEventListener('click', () => {
-    if (!validateConceptSelection()) return;
-    const id = saveConceptIfNeeded();
-    draft.conceptId = id || document.getElementById('lc-conceptSelect').value;
+  to2 && to2.addEventListener('click', async () => {
+    console.log('[NEXT BUTTON] Button clicked');
+    console.log('[NEXT BUTTON] Button disabled state:', to2.disabled);
+    
+    const isValid = validateConceptSelection();
+    console.log('[NEXT BUTTON] Validation result:', isValid);
+    
+    if (!isValid) {
+      console.log('[NEXT BUTTON] Validation failed, stopping');
+      return;
+    }
+    
+    console.log('[NEXT BUTTON] Calling saveConceptIfNeeded...');
+    const id = await saveConceptIfNeeded();
+    console.log('[NEXT BUTTON] saveConceptIfNeeded returned:', id);
+    
+    const selectValue = document.getElementById('lc-conceptSelect').value;
+    console.log('[NEXT BUTTON] Select dropdown value:', selectValue);
+    
+    draft.conceptId = id || selectValue;
     draft.lesson.conceptId = draft.conceptId;
+    console.log('[NEXT BUTTON] Set draft.conceptId to:', draft.conceptId);
+    console.log('[NEXT BUTTON] Proceeding to step 2');
     setStep(2);
   });
+  
+  console.log('[bindEvents] Attached click listener to to2 button');
 
   ['lc-lessonTitle'].forEach(id => {
     const el = document.getElementById(id);
@@ -776,6 +1219,8 @@ function bindEvents(username) {
 
   to4 && to4.addEventListener('click', () => {
     if (!validateContent()) return;
+    // Supabase autosave payload
+    updateDraftPayload();
     buildReview();
     setStep(4);
   });
@@ -786,17 +1231,107 @@ function bindEvents(username) {
   back3 && back3.addEventListener('click', () => setStep(3));
 }
 
-async function init() {
+export async function initLessonCreator() {
+  // Check for last publish attempt
+  try {
+    const lastError = localStorage.getItem('gls_last_publish_error');
+    const lastSuccess = localStorage.getItem('gls_last_publish_success');
+    if (lastError) {
+      const err = JSON.parse(lastError);
+      console.warn('[INIT] Last publish error:', err);
+    }
+    if (lastSuccess) {
+      const succ = JSON.parse(lastSuccess);
+      // Check last publish success
+    }
+  } catch {}
+  
   migrateLegacyProfileIfNeeded();
   const active = ensureActiveUserOrRedirect();
   if (!active) return;
   initHeader(active);
-  builtInConcepts = await loadAllConcepts();
-  customConceptsCache = loadCustomConcepts();
+  // No longer load builtInConcepts - only use Supabase concepts
+  builtInConcepts = [];
+  
+  // Load concepts from Supabase
+  try {
+    const { listConcepts } = await import('./dataStore.js');
+    const { concepts, error } = await listConcepts();
+    if (!error && concepts) {
+      customConceptsCache = concepts.map(c => ({
+        id: c.content?.source_id || c.id,
+        title: c.title,
+        subject: c.content?.domain || 'general',
+        summary: c.summary || '',
+        tags: c.tags || [],
+        estimatedMinutesToBasicMastery: 20,
+        isCustom: true,
+        createdBy: c.owner_id
+      }));
+    } else {
+      // Fallback to localStorage
+      customConceptsCache = loadCustomConcepts();
+    }
+  } catch (e) {
+    console.error('Failed to load concepts from Supabase:', e);
+    customConceptsCache = loadCustomConcepts();
+  }
+  
   customLessonsCache = loadCustomLessons();
-  refreshConceptSelect();
+  // Create Supabase draft at entry if authed
+  try {
+    if (window.supabaseClient && window.supabaseClient.isConfigured && window.supabaseClient.isConfigured()) {
+      console.log('[INIT] Supabase is configured, checking session...');
+      const ok = await window.supabaseClient.waitForSessionReady?.(1500, 150);
+      const { data } = await window.supabaseClient.getSession();
+      const user = data && data.session ? data.session.user : null;
+      console.log('[INIT] Session ready:', ok, 'User:', user?.id);
+      // Don't create draft on page load - wait until user clicks "Next: Basics"
+      // This prevents accumulation of abandoned "Untitled Lesson" drafts
+    } else {
+      console.warn('[INIT] Supabase not configured');
+    }
+  } catch (e) {
+    console.error('[INIT] Draft creation failed:', e);
+  }
+  await refreshConceptSelect();
   bindEvents(active);
   setStep(1);
 }
 
-init().catch(err => console.error('Lesson creator init failed', err));
+async function updateDraftBasics() {
+  try {
+    if (!_sbDraftId) return;
+    const { updateLessonDraft } = await import('./dataStore.js');
+    await updateLessonDraft(_sbDraftId, {
+      title: draft.lesson.title,
+      description: draft.lesson.description,
+      content_type: draft.lesson.type
+    });
+  } catch {}
+}
+
+async function updateDraftPayload() {
+  try {
+    if (!_sbDraftId) return;
+    const { updateLessonDraft } = await import('./dataStore.js');
+    await updateLessonDraft(_sbDraftId, { payload: draft.lesson.contentConfig });
+  } catch {}
+}
+
+function buildSupabasePayloadFromDraft() {
+  try {
+    const l = draft.lesson;
+    return {
+      title: l.title,
+      description: l.description || '',
+      content_type: l.type,
+      content_url: (l.type === 'video' ? (l.contentConfig?.video?.url || '') : (l.type === 'unity_game' ? (l.contentConfig?.unity_game?.url || '') : (l.type === 'external_link' ? '' : ''))),
+      concept_id: l.conceptId || null,
+      payload: l.contentConfig || {}
+    };
+  } catch { return {}; }
+}
+
+// Legacy: keep for backward compatibility
+initLessonCreator().catch(err => console.error('Lesson creator init failed', err));

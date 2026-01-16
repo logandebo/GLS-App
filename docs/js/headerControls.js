@@ -2,7 +2,8 @@
 import { ACTIVE_USER_KEY } from './storage.js?v=20260103';
 import { subscribe } from './auth/authStore.js?v=20260103';
 
-try { console.log('[DEBUG] headerControls.start'); } catch {}
+// Header Controls initialization
+try { } catch {}
 
 function setAvatarText(el, name){
   if (!el) return;
@@ -35,7 +36,7 @@ function renderHeader(state){
   const user = state.user;
   const meta = user?.user_metadata || {};
   const name = [meta.full_name, meta.preferred_username, meta.username, meta.name].find(v => typeof v === 'string' && v.trim()) || (user?.email||'').split('@')[0] || null;
-  try { console.log(`[DEBUG] headerControls.render -> status=${state.status} name=${name||'none'}`); } catch {}
+  try { } catch {}
 
   if (loggedIn){
     if (loginBtn) loginBtn.style.display = 'none';
@@ -66,7 +67,7 @@ function bindEvents(){
         keys.filter(k => k.startsWith('sb-') && k.includes('auth')).forEach(k => localStorage.removeItem(k));
         // Set logout guard to block migration on next init
         localStorage.setItem('gls-auth-logged-out', '1');
-        console.log('[AUTH] header logout cleared tokens and set logged-out flag');
+        // Logout complete
       } catch {}
     };
     const timer = scheduleReload(500);
@@ -97,7 +98,7 @@ function bindEvents(){
           const keys = Object.keys(localStorage || {});
           keys.filter(k => k.startsWith('sb-') && k.includes('auth')).forEach(k => localStorage.removeItem(k));
           localStorage.setItem('gls-auth-logged-out', '1');
-          console.log('[AUTH] header delegated logout cleared tokens and set logged-out flag');
+          // Delegated logout complete
         } catch {}
       };
       const timer = scheduleReload(500);
@@ -124,7 +125,7 @@ function bindEvents(){
 
 export function initHeaderControls(){
   console.log('[DEBUG] headerControls init');
-  try { bindEvents(); console.log('[DEBUG] headerControls.bound'); } catch (e) { console.log('[DEBUG] headerControls.error bindEvents', e); }
+  try { bindEvents(); } catch (e) { }
   const unsubscribe = subscribe((s) => {
     try { renderHeader(s); } catch (e) { console.error('[headerControls] render error', e); }
   });

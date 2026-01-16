@@ -24,7 +24,7 @@
         displayUser = deriveDisplayName(user) || (user && (user.email || user.id)) || 'anonymous';
       }
     } catch {}
-    console.log(`[DEBUG] ${ctx} -> page=${pageId || path} path=${path} loggedIn=${loggedIn} user=${displayUser}`);
+    // Debug logging removed
   }
 
   // Log on page load
@@ -37,7 +37,7 @@
         const user = session && session.user ? session.user : null;
         const loggedIn = Boolean(user);
         const displayUser = deriveDisplayName(user) || (user && (user.email || user.id)) || 'none';
-        console.log(`[DEBUG] auth_change -> page=${pageId || path} loggedIn=${loggedIn} user=${displayUser}`);
+        // Debug logging removed
       });
     }
   } catch {}
