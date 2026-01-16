@@ -229,7 +229,7 @@ async function loadTreeSelect(){
   await renderTreeList();
 }
 
-function createNewTree(){
+async function createNewTree(){
   const userId = getActiveUsername();
   const title = (document.getElementById('treeTitle').value || '').trim() || 'Untitled Tree';
   const description = document.getElementById('treeDesc').value || '';
@@ -581,7 +581,7 @@ function removeSequence(idx){
   refreshVisualEditor();
 }
 
-function saveCurrentTree(){
+async function saveCurrentTree(){
   if (!_currentTreeId){ renderToast('No tree selected', 'warning'); return; }
   const userId = getActiveUsername();
   const tree = getCreatorTree(userId, _currentTreeId);
@@ -857,7 +857,7 @@ function renderCloudPublishStatus(){
   } catch {}
 }
 
-function deleteCurrentTree(){
+async function deleteCurrentTree(){
   if (!_currentTreeId){ renderToast('No tree selected', 'warning'); return; }
   const userId = getActiveUsername();
   const tree = getCreatorTree(userId, _currentTreeId);
@@ -910,7 +910,7 @@ function exportCurrentTree(){
 function handleImportTree(e){
   const file = e.target.files && e.target.files[0];
   if (!file) return;
-  file.text().then(text => {
+  file.text().then(async text => {
     try {
       const data = JSON.parse(text);
       const userId = getActiveUsername();
@@ -925,7 +925,7 @@ function handleImportTree(e){
     } catch (err){
       renderToast(err.message || 'Import failed', 'error');
     } finally { e.target.value=''; }
-		renderTreeList();
+		await renderTreeList();
   });
 }
 
