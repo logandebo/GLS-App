@@ -559,16 +559,13 @@ export async function getCoursesByUser() {
   if (!c) return { courses: [], error: new Error('Supabase not configured') };
   const { user } = await getAuthUser();
   if (!user) return { courses: [], error: new Error('No auth user') };
-  // Try created_by filter first; if schema uses owner_id, fallback
-  // Join with profiles to get creator display name
-  let { data, error } = await c.from(tableNameCourses()).select('*, profiles(display_name)').eq('created_by', user.id);
-  if (error && hasColumnError(error, 'created_by', tableNameCourses())) {
-    const res = await c.from(tableNameCourses()).select('*').eq('owner_id', user.id);
-    data = res.data; error = res.error;
-  }
+  console.log('[getCoursesByUser] Querying courses for user:', user.id);
+  // Query courses table without join first
+  let { data, error } = await c.from(tableNameCourses()).select('*').eq('created_by', user.id);
+  console.log('[getCoursesByUser] Query result:', data?.length, 'courses, error:', error);
   if (error || !Array.isArray(data)) {
-    const { data: legacy, error: legacyErr } = await c.from(tableNameLegacyTrees()).select('*').eq('owner_id', user.id);
-    if (!legacyErr && Array.isArray(legacy)) { data = legacy; error = null; }
+    console.log('[getCoursesByUser] Courses query failed, returning empty array');
+    return { courses: [], error };
   }
   return { courses: Array.isArray(data) ? data.map(normalizeCourseRow) : [], error };
 }

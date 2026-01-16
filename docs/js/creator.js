@@ -980,10 +980,7 @@ async function renderTreeList(){
 	if (!list) return;
 	const userId = getActiveUsername();
 	
-	// Load trees from localStorage
-	const localTrees = loadCreatorTrees(userId);
-	
-	// Load trees from Supabase
+	// Only load trees from Supabase (not localStorage)
 	let cloudCourses = [];
 	try {
 		const sb = window.supabaseClient;
@@ -991,7 +988,9 @@ async function renderTreeList(){
 			const { data } = await sb.getSession();
 			const user = data && data.session ? data.session.user : null;
 			if (user) {
+				console.log('[renderTreeList] Loading courses for user...');
 				const { courses, error } = await dsGetCoursesByUser();
+				console.log('[renderTreeList] Courses loaded:', courses?.length, 'error:', error);
 				if (!error && Array.isArray(courses)) {
 					cloudCourses = courses;
 				}
@@ -1001,14 +1000,14 @@ async function renderTreeList(){
 		console.error('[renderTreeList] Error loading cloud courses:', e);
 	}
 	
-	// Combine local and cloud trees
-	const allTrees = [...localTrees, ...cloudCourses.map(c => ({
+	// Use only cloud trees
+	const allTrees = cloudCourses.map(c => ({
 		id: 'cloud:' + c.id,
 		actualId: c.id,
 		title: c.title || c.slug || c.id,
 		isCloud: true,
 		cloudData: c
-	}))];
+	}));
 	
 	list.innerHTML = '';
 	if (!allTrees.length){
