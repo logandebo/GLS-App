@@ -21,9 +21,9 @@ let _combinedIndex = null; // master + public concepts from Supabase
 
 (async function init(){
   console.log('[subtree_node] INIT START');
-  const ok = ensureActiveUserOrRedirect();
-  console.log('[subtree_node] Auth check:', ok);
-  if (!ok) return;
+  // Changed: Allow guest access, don't require auth
+  const username = getActiveUsername();
+  console.log('[subtree_node] Username:', username || 'guest');
   await loadGraphStore();
   const nodes = gsGetAllNodes();
   console.log('[subtree_node] Master nodes loaded:', nodes.length);
