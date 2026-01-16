@@ -18,7 +18,8 @@ import { loadPublicCatalog } from './catalogStore.js';
 	if (switchBtn) switchBtn.addEventListener('click', () => { window.location.href = 'auth.html'; });
 })();
 
-(async function init() {
+export async function initLessonPlayer() {
+	console.log('[player] initLessonPlayer starting...');
 	migrateLegacyProfileIfNeeded();
 	const active = ensureActiveUserOrRedirect();
 	if (!active) return;
@@ -37,49 +38,99 @@ import { loadPublicCatalog } from './catalogStore.js';
 		const lessonId = url.searchParams.get('lessonId');
 		const treeId = url.searchParams.get('treeId');
 		const conceptId = url.searchParams.get('conceptId');
+		console.log('[player] URL params:', { lessonId, treeId, conceptId });
 		if (!lessonId) {
 			renderToast('Missing lessonId', 'error');
 			if (container) container.textContent = 'No lesson specified.';
 			return;
 		}
+		console.log('[player] Looking up lesson:', lessonId);
 		let lesson = getLessonById(lessonId);
 		if (!lesson) {
+			console.log('[player] Lesson not in local cache, fetching from Supabase...');
 			try {
 				const { lesson: cloud } = await dsGetLesson(lessonId);
+				console.log('[player] Supabase result:', cloud);
 				if (cloud) {
+					console.log('[player] Normalizing cloud lesson...');
 					lesson = normalizeCloudLesson(cloud);
+					console.log('[player] Normalized lesson:', lesson);
+					console.log('[player] Lesson structure check - title:', lesson?.title, 'type:', lesson?.type, 'contentConfig:', lesson?.contentConfig);
+				} else {
+					console.log('[player] Supabase returned null/undefined lesson');
 				}
-			} catch {}
+			} catch (e) {
+				console.error('[player] Error fetching from Supabase:', e);
+			}
 		}
 		if (!lesson) {
+			console.error('[player] Lesson not found:', lessonId);
 			renderToast('Lesson not found', 'error');
 			if (container) container.textContent = 'Lesson not found.';
 			return;
 		}
+		console.log('[player] Lesson found:', lesson.title);
+		console.log('[player] Lesson structure check - title:', lesson?.title, 'type:', lesson?.type, 'contentConfig:', lesson?.contentConfig);
 		const concept = getConceptById(lesson.conceptId);
+		console.log('[player] Concept from graph.js:', concept ? concept.title : 'not found');
+		
+		// Fallback: if concept not found in graph, try loading from Supabase
+		let conceptToUse = concept;
+		if (!conceptToUse && lesson.conceptId) {
+			console.log('[player] Trying to load concept from Supabase...');
+			try {
+				const { listConcepts } = await import('./dataStore.js');
+				const { concepts } = await listConcepts();
+				if (Array.isArray(concepts)) {
+					conceptToUse = concepts.find(c => c.id === lesson.conceptId);
+					console.log('[player] Concept from Supabase:', conceptToUse ? conceptToUse.title : 'not found');
+				}
+			} catch (e) {
+				console.error('[player] Error loading concepts from Supabase:', e);
+			}
+		}
+		
 		const profile = getOrCreateDefaultProfile();
-		setupMeta(lesson, concept);
+		setupMeta(lesson, conceptToUse);
 		if (container) container.innerHTML = '';
 		setupPlaylistModal(lesson);
 		// Back navigation buttons for subtree context
 		const backLessonsBtn = document.getElementById('backToLessonsBtn');
 		const backTreeBtn = document.getElementById('backToTreeBtn');
+		console.log('[player] Back buttons:', { backLessonsBtn: !!backLessonsBtn, backTreeBtn: !!backTreeBtn });
 		if (backLessonsBtn) {
-			if (treeId && conceptId) backLessonsBtn.addEventListener('click', () => {
-				window.location.href = `subtree_node.html?treeId=${encodeURIComponent(treeId)}&conceptId=${encodeURIComponent(conceptId)}`;
-			});
-			else backLessonsBtn.addEventListener('click', () => { window.location.href = 'courses.html'; });
+			if (treeId && conceptId) {
+				console.log('[player] Setting up back to lessons button with subtree context');
+				backLessonsBtn.addEventListener('click', () => {
+					const url = `subtree_node.html?treeId=${encodeURIComponent(treeId)}&conceptId=${encodeURIComponent(conceptId)}`;
+					console.log('[player] Navigating to:', url);
+					window.location.href = url;
+				});
+			}
+			else {
+				console.log('[player] Setting up back to lessons button (no subtree context)');
+				backLessonsBtn.addEventListener('click', () => { window.location.href = 'courses.html'; });
+			}
 		}
 		if (backTreeBtn) {
-			if (treeId) backTreeBtn.addEventListener('click', () => {
-				window.location.href = `subtree.html?treeId=${encodeURIComponent(treeId)}`;
-			});
-			else backTreeBtn.addEventListener('click', () => { window.location.href = 'courses.html'; });
+			if (treeId) {
+				console.log('[player] Setting up back to tree button');
+				backTreeBtn.addEventListener('click', () => {
+					const url = `subtree.html?treeId=${encodeURIComponent(treeId)}`;
+					console.log('[player] Navigating to:', url);
+					window.location.href = url;
+				});
+			}
+			else {
+				console.log('[player] Setting up back to tree button (no tree context)');
+				backTreeBtn.addEventListener('click', () => { window.location.href = 'courses.html'; });
+			}
 		}
-		renderLesson(lesson, concept, profile);
+		console.log('[player] Rendering lesson...');
+		renderLesson(lesson, conceptToUse, profile);
 		// Sidebar rendering for subtree context
 		if (treeId && conceptId) {
-			renderSubtreeSidebar(treeId, conceptId, lesson.id);
+			await renderSubtreeSidebar(treeId, conceptId, lesson.id);
 			const toggle = document.getElementById('subtreeSidebarToggle');
 			const sidebar = document.getElementById('subtreeSidebar');
 			const layout = document.getElementById('lessonLayout');
@@ -108,7 +159,7 @@ import { loadPublicCatalog } from './catalogStore.js';
 		if (container) container.textContent = 'Error loading lesson.';
 		renderToast('Failed to load lesson. Please try again.', 'error');
 	}
-})();
+}
 
 function normalizeCloudLesson(row) {
 	const typeMap = { video: 'video', game: 'unity_game', quiz: 'quiz', article: 'video', external: 'external_link' };
@@ -116,9 +167,40 @@ function normalizeCloudLesson(row) {
 	const payload = row.payload || {};
 	let contentConfig = { video: undefined, unity_game: undefined, quiz: undefined, external_link: undefined };
 	if (type === 'video') {
-		contentConfig.video = { url: row.content_url || payload?.video?.url || '' };
+		// Preserve source-based video config (YouTube, R2, Supabase Storage, external)
+		const source = payload?.video?.source || null;
+		const youtubeUrl = payload?.video?.youtubeUrl || null;
+		const storagePath = payload?.video?.storagePath || null;
+		const url = row.content_url || payload?.video?.url || '';
+		const r2Key = payload?.video?.r2Key || null;
+		
+		if (source === 'youtube' && youtubeUrl) {
+			contentConfig.video = { source: 'youtube', youtubeUrl };
+		} else if (source === 'r2' && r2Key) {
+			contentConfig.video = { source: 'r2', r2Key, url };
+		} else if (source === 'supabase' && storagePath) {
+			contentConfig.video = { source: 'supabase', storagePath, url };
+		} else if (source === 'external' && url) {
+			contentConfig.video = { source: 'external', url };
+		} else if (storagePath) {
+			// Legacy: storagePath without explicit source
+			contentConfig.video = { source: 'supabase', storagePath, url };
+		} else if (url) {
+			// Fallback: external URL
+			contentConfig.video = { source: 'external', url };
+		} else {
+			contentConfig.video = { url: '' };
+		}
 	} else if (type === 'unity_game') {
-		contentConfig.unity_game = { url: row.content_url || payload?.unity_game?.url || '' };
+		// Preserve R2 Unity builds
+		const source = payload?.unity_game?.source || null;
+		const r2Key = payload?.unity_game?.r2Key || null;
+		const url = row.content_url || payload?.unity_game?.url || '';
+		if (source === 'r2' && r2Key) {
+			contentConfig.unity_game = { source: 'r2', r2Key, url };
+		} else {
+			contentConfig.unity_game = { source: source || 'external', url };
+		}
 	} else if (type === 'quiz') {
 		contentConfig.quiz = payload?.quiz || { shuffleQuestions: true, questions: [] };
 	} else if (type === 'external_link') {
@@ -141,10 +223,18 @@ function normalizeCloudLesson(row) {
 }
 
 function setupMeta(lesson, concept) {
+	console.log('[setupMeta] Called with lesson:', lesson, 'concept:', concept);
+	if (!lesson) {
+		console.error('[setupMeta] Lesson is null or undefined!');
+		return;
+	}
 	const titleEl = document.getElementById('lessonTitle');
-	titleEl.textContent = lesson.title;
+	if (titleEl) titleEl.textContent = lesson.title;
 	const meta = document.getElementById('lessonMeta');
-	meta.innerHTML = `<p>Concept: ${concept.title}</p>\n<p>XP Reward: ${lesson.xpReward}</p>`;
+	if (meta) {
+		const conceptTitle = concept ? concept.title : 'Unknown Concept';
+		meta.innerHTML = `<p>Concept: ${conceptTitle}</p>\n<p>XP Reward: ${lesson.xpReward || 0}</p>`;
+	}
 }
 
 function renderLesson(lesson, concept, profile) {
@@ -409,14 +499,17 @@ function computeSubtreeOrderedLessons(treeId, conceptId){
 	} catch { return []; }
 }
 
-function renderSubtreeSidebar(treeId, conceptId, currentLessonId){
+async function renderSubtreeSidebar(treeId, conceptId, currentLessonId){
+	console.log('[renderSubtreeSidebar] Called with:', { treeId, conceptId, currentLessonId });
 	const listEl = document.getElementById('subtreeSidebarList');
 	if (!listEl) return;
-	const grouping = computeSubtreeStepGroups(treeId, conceptId);
+	const grouping = await computeSubtreeStepGroups(treeId, conceptId);
+	console.log('[renderSubtreeSidebar] Grouping result:', grouping);
 	const orderedSteps = grouping.orderedSteps || [];
 	const byStep = grouping.byStep || new Map();
 	listEl.innerHTML = '';
 	if (!orderedSteps.length){
+		console.log('[renderSubtreeSidebar] No lessons found in grouping');
 		const p = document.createElement('p'); p.className='short muted'; p.textContent = 'No lessons available.'; listEl.appendChild(p);
 		return;
 	}
@@ -460,39 +553,118 @@ function renderSubtreeSidebar(treeId, conceptId, currentLessonId){
 	});
 }
 
-function computeSubtreeStepGroups(treeId, conceptId){
+async function computeSubtreeStepGroups(treeId, conceptId){
+	console.log('[computeSubtreeStepGroups] Called with:', { treeId, conceptId });
 	try {
-		const catalog = loadPublicCatalog();
-		const tree = (catalog || []).find(t => String(t.id) === String(treeId));
-		if (!tree) return { orderedSteps: [], byStep: new Map() };
-		const node = (Array.isArray(tree.nodes) ? tree.nodes : []).find(n => String(n.conceptId) === String(conceptId)) || null;
-		const allLessons = getAllLessons();
-		const byId = new Map(allLessons.map(l => [l.id, l]));
-		let mine = [];
-		if (node && Array.isArray(node.subtreeLessonIds) && node.subtreeLessonIds.length){
-			mine = node.subtreeLessonIds.map(id => byId.get(id)).filter(Boolean);
+		// Load course from Supabase
+		const { getCourseById, listPublicLessons } = await import('./dataStore.js');
+		const { course, error } = await getCourseById(treeId);
+		console.log('[computeSubtreeStepGroups] Course from Supabase:', course, error);
+		
+		let tree = null;
+		if (!error && course) {
+			tree = course;
 		} else {
-			const conceptLessons = getLessonsForConcept(conceptId) || [];
-			mine = conceptLessons.filter(l => String(l.createdBy || '') === String(tree.creatorId || ''));
+			// Fallback to localStorage catalog
+			const catalog = loadPublicCatalog();
+			console.log('[computeSubtreeStepGroups] Catalog from localStorage:', catalog);
+			tree = (catalog || []).find(t => String(t.id) === String(treeId));
 		}
-		const stepMap = (node && node.subtreeLessonSteps && typeof node.subtreeLessonSteps==='object') ? node.subtreeLessonSteps : {};
+		
+		if (!tree) {
+			console.log('[computeSubtreeStepGroups] No tree found for treeId:', treeId);
+			return { orderedSteps: [], byStep: new Map() };
+		}
+		
+		console.log('[computeSubtreeStepGroups] Tree structure:', {
+			id: tree.id,
+			title: tree.title,
+			hasNodes: !!tree.nodes,
+			nodesIsArray: Array.isArray(tree.nodes),
+			nodesLength: Array.isArray(tree.nodes) ? tree.nodes.length : 'N/A',
+			nodes: tree.nodes
+		});
+		
+		// Find the node for this concept in the tree
+		const nodes = Array.isArray(tree.nodes) ? tree.nodes : [];
+		console.log('[computeSubtreeStepGroups] All nodes:', nodes.map(n => ({
+			conceptId: n?.conceptId,
+			subtreeLessonIds: n?.subtreeLessonIds,
+			subtreeLessonSteps: n?.subtreeLessonSteps
+		})));
+		
+		const node = nodes.find(n => String(n.conceptId) === String(conceptId)) || null;
+		console.log('[computeSubtreeStepGroups] Looking for conceptId:', conceptId);
+		console.log('[computeSubtreeStepGroups] Node found:', node);
+		console.log('[computeSubtreeStepGroups] Node subtreeLessonIds:', node?.subtreeLessonIds);
+		console.log('[computeSubtreeStepGroups] Node subtreeLessonSteps:', node?.subtreeLessonSteps);
+		
+		// If no node or no lessons assigned, return empty
+		if (!node || !Array.isArray(node.subtreeLessonIds) || node.subtreeLessonIds.length === 0) {
+			console.log('[computeSubtreeStepGroups] No lessons assigned to this node');
+			return { orderedSteps: [], byStep: new Map() };
+		}
+		
+		// Load all public lessons from Supabase
+		const { lessons: allLessons, error: lessonsError } = await listPublicLessons();
+		console.log('[computeSubtreeStepGroups] All public lessons from Supabase:', allLessons?.length, lessonsError);
+		
+		if (lessonsError || !Array.isArray(allLessons)) {
+			console.error('[computeSubtreeStepGroups] Failed to load lessons:', lessonsError);
+			return { orderedSteps: [], byStep: new Map() };
+		}
+		
+		// Create a map of lesson ID to lesson object
+		const byId = new Map(allLessons.map(l => [l.id, l]));
+		console.log('[computeSubtreeStepGroups] Lesson ID map size:', byId.size);
+		
+		// Get only the lessons that are in this node's subtreeLessonIds
+		const mine = node.subtreeLessonIds.map(id => byId.get(id)).filter(Boolean);
+		console.log('[computeSubtreeStepGroups] Matched lessons:', mine.length, 'out of', node.subtreeLessonIds.length, 'IDs');
+		console.log('[computeSubtreeStepGroups] Lessons:', mine.map(l => ({ id: l.id, title: l.title, type: l.type })));
+		
+		// Get step assignments for lessons (defaults to step 1)
+		const stepMap = (node.subtreeLessonSteps && typeof node.subtreeLessonSteps === 'object') ? node.subtreeLessonSteps : {};
+		console.log('[computeSubtreeStepGroups] Step map:', stepMap);
+		
+		// Group lessons by step number and type
 		const byStep = new Map();
 		function bucketFor(step){
-			const s = Number(step)||1;
-			if (!byStep.has(s)) byStep.set(s, { videos:[], quizzes:[], games:[], articles:[], other:[] });
+			const s = Number(step) || 1;
+			if (!byStep.has(s)) byStep.set(s, { videos: [], quizzes: [], games: [], articles: [], other: [] });
 			return byStep.get(s);
 		}
+		
 		mine.forEach(l => {
-			const s = stepMap[l.id] || 1;
-			const b = bucketFor(s);
-			const t = normalizeLessonType(l.type);
-			if (t === 'video') b.videos.push(l);
-			else if (t === 'quiz') b.quizzes.push(l);
-			else if (t === 'game') b.games.push(l);
-			else if (t === 'article') b.articles.push(l);
-			else b.other.push(l);
+			const stepNum = stepMap[l.id] || 1;
+			const bucket = bucketFor(stepNum);
+			const type = normalizeLessonType(l.type);
+			console.log('[computeSubtreeStepGroups] Placing lesson', l.id, 'in step', stepNum, 'type', type);
+			
+			if (type === 'video') bucket.videos.push(l);
+			else if (type === 'quiz') bucket.quizzes.push(l);
+			else if (type === 'game') bucket.games.push(l);
+			else if (type === 'article') bucket.articles.push(l);
+			else bucket.other.push(l);
 		});
-		const orderedSteps = Array.from(byStep.keys()).sort((a,b)=>a-b);
+		
+		// Sort steps numerically
+		const orderedSteps = Array.from(byStep.keys()).sort((a, b) => a - b);
+		console.log('[computeSubtreeStepGroups] Ordered steps:', orderedSteps);
+		console.log('[computeSubtreeStepGroups] Step contents:', Array.from(byStep.entries()).map(([step, buckets]) => [
+			step,
+			{
+				videos: buckets.videos.length,
+				quizzes: buckets.quizzes.length,
+				games: buckets.games.length,
+				articles: buckets.articles.length,
+				other: buckets.other.length
+			}
+		]));
+		
 		return { orderedSteps, byStep };
-	} catch { return { orderedSteps: [], byStep: new Map() }; }
+	} catch (e) { 
+		console.error('[computeSubtreeStepGroups] Error:', e);
+		return { orderedSteps: [], byStep: new Map() }; 
+	}
 }
