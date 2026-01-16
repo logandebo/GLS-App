@@ -88,7 +88,7 @@ let _cloudCourses = [];
       });
     } catch {}
     initControls();
-    loadTreeSelect();
+    await loadTreeSelect();
     renderSearchResults();
   } catch (e) {
     console.error('Failed to init creator builder', e);
@@ -189,44 +189,44 @@ async function reloadLessonsCache(refreshGraph = false){
   } catch {}
 }
 
-function loadTreeSelect(){
+async function loadTreeSelect(){
   const sel = document.getElementById('treeSelect');
   sel.innerHTML = '';
-  const trees = loadCreatorTrees(getActiveUsername());
-  const placeholder = document.createElement('option');
-  placeholder.value = '';
-  placeholder.textContent = trees.length ? 'Select tree…' : 'No trees yet';
-  sel.appendChild(placeholder);
-  trees.forEach(t => {
-    const opt = document.createElement('option');
-    opt.value = t.id;
-    opt.textContent = t.title || t.id;
-    sel.appendChild(opt);
-  });
-  // Append Cloud courses owned by the user (Supabase)
-  (async () => {
-    try {
-      _cloudCourses = [];
-      const sb = window.supabaseClient;
-      if (sb && typeof sb.isConfigured === 'function' && sb.isConfigured()) {
-        const { data } = await sb.getSession();
-        const user = data && data.session ? data.session.user : null;
-        if (user) {
-          const { courses, error } = await dsGetCoursesByUser();
-          if (!error && Array.isArray(courses) && courses.length) {
-            _cloudCourses = courses;
-            courses.forEach(row => {
-              const opt = document.createElement('option');
-              opt.value = 'cloud:' + row.id;
-              opt.textContent = (row.title || row.slug || row.id) + ' (cloud)';
-              sel.appendChild(opt);
-            });
-          }
+  
+  // Only load from Supabase (not localStorage)
+  let cloudCourses = [];
+  try {
+    const sb = window.supabaseClient;
+    if (sb && typeof sb.isConfigured === 'function' && sb.isConfigured()) {
+      const { data } = await sb.getSession();
+      const user = data && data.session ? data.session.user : null;
+      if (user) {
+        console.log('[loadTreeSelect] Loading courses for user...');
+        const { courses, error } = await dsGetCoursesByUser();
+        console.log('[loadTreeSelect] Courses loaded:', courses?.length, 'error:', error);
+        if (!error && Array.isArray(courses)) {
+          cloudCourses = courses;
+          _cloudCourses = courses;
         }
       }
-    } catch {}
-  })();
-	renderTreeList();
+    }
+  } catch (e) {
+    console.error('[loadTreeSelect] Error loading cloud courses:', e);
+  }
+  
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = cloudCourses.length ? 'Select tree…' : 'No trees yet';
+  sel.appendChild(placeholder);
+  
+  cloudCourses.forEach(row => {
+    const opt = document.createElement('option');
+    opt.value = 'cloud:' + row.id;
+    opt.textContent = (row.title || row.slug || row.id) + ' (cloud)';
+    sel.appendChild(opt);
+  });
+  
+  await renderTreeList();
 }
 
 function createNewTree(){
@@ -238,7 +238,7 @@ function createNewTree(){
   const tree = createCreatorTree(userId, { title, description, primaryDomain, tags });
   _currentTreeId = tree.id;
   _sequence = [];
-  loadTreeSelect();
+  await loadTreeSelect();
   document.getElementById('treeSelect').value = tree.id;
   renderSequence();
   // Default to visual editor for immediate feedback
@@ -622,10 +622,10 @@ function saveCurrentTree(){
   } catch {}
   // Intentionally avoid recomputing links here so save doesn't change edges
   renderToast('Tree saved', 'success');
-  loadTreeSelect();
+  await loadTreeSelect();
   document.getElementById('treeSelect').value = tree.id;
   validateAndShow(tree);
-	renderTreeList();
+	await renderTreeList();
   refreshVisualEditor();
   renderIntroVideoPreview();
   // Also save to Supabase as draft (source of truth)
@@ -877,7 +877,7 @@ function deleteCurrentTree(){
     document.getElementById('treeDomain').value = '';
     document.getElementById('treeTags').value = '';
     // Refresh UI
-    loadTreeSelect();
+    await loadTreeSelect();
     renderSequence();
     refreshVisualEditor();
     renderIntroVideoPreview();
@@ -918,7 +918,7 @@ function handleImportTree(e){
       _currentTreeId = tree.id;
       _sequence = tree.nodes.map(n => n.conceptId);
       renderToast('Tree imported', 'success');
-      loadTreeSelect();
+      await loadTreeSelect();
       document.getElementById('treeSelect').value = tree.id;
       renderSequence();
       refreshVisualEditor();
