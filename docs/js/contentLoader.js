@@ -6,18 +6,22 @@ export const CUSTOM_LESSONS_KEY = 'gep_customLessons';
 export const PUBLIC_CONCEPTS_KEY = 'gep_publicConcepts';
 
 export function loadCustomConcepts() {
-	const raw = localStorage.getItem(CUSTOM_CONCEPTS_KEY);
-	if (!raw) return [];
+	// No longer load from localStorage - concepts only come from Supabase
+	// Clear old data if it exists - clear ALL possible cache keys
 	try {
-		const parsed = JSON.parse(raw);
-		return Array.isArray(parsed) ? parsed : [];
-	} catch {
-		return [];
-	}
+		localStorage.removeItem(CUSTOM_CONCEPTS_KEY);
+		localStorage.removeItem('cache:concepts');
+		localStorage.removeItem('gep_publicConcepts'); // Also clear public concepts cache
+		// Set a flag to indicate migration to Supabase-only
+		localStorage.setItem('gep_concepts_migrated_to_supabase', 'true');
+	} catch {}
+	return [];
 }
 
 export function saveCustomConcepts(concepts) {
-	localStorage.setItem(CUSTOM_CONCEPTS_KEY, JSON.stringify(concepts || []));
+	// No longer save to localStorage - concepts are saved to Supabase via dataStore.js
+	// This function is kept for backward compatibility but does nothing
+	console.log('[contentLoader] saveCustomConcepts is deprecated - use dataStore.upsertConcept instead');
 }
 
 export function loadCustomLessons() {
@@ -185,12 +189,94 @@ export async function loadAllConcepts() {
 
 // Load all lessons: built-in (from data/lessons.json) + custom from localStorage
 export async function loadAllLessons() {
-	const res = await fetch('data/lessons.json');
-	if (!res.ok) throw new Error('Failed to load built-in lessons');
-	const data = await res.json();
-	const builtinLegacy = Array.isArray(data?.lessons) ? data.lessons : Array.isArray(data) ? data : [];
-	const builtinNormalized = builtinLegacy.map(normalizeLesson);
-	const customLegacy = loadCustomLessons();
-	const customNormalized = customLegacy.map(normalizeLesson);
-	return [...builtinNormalized, ...customNormalized];
+	// Only load lessons from Supabase (no fallback to built-in JSON or localStorage)
+	console.log('[loadAllLessons] START - checking Supabase...');
+	console.log('[loadAllLessons] window.supabaseClient exists?', !!window.supabaseClient);
+	console.log('[loadAllLessons] isConfigured?', window.supabaseClient?.isConfigured?.());
+	try {
+		if (window.supabaseClient && window.supabaseClient.isConfigured && window.supabaseClient.isConfigured()) {
+			console.log('[loadAllLessons] Supabase is configured, importing dataStore...');
+			const { listPublicLessons } = await import('./dataStore.js');
+			console.log('[loadAllLessons] Calling listPublicLessons()...');
+			const { lessons: cloud, error } = await listPublicLessons();
+			console.log('[loadAllLessons] listPublicLessons returned:', cloud?.length, 'lessons, error:', error);
+			if (!error && Array.isArray(cloud)) {
+				console.log('[loadAllLessons] Normalizing', cloud.length, 'Supabase lessons...');
+				// Map Supabase rows to normalized lesson objects
+				const normalized = cloud.map(row => {
+					const typeMap = { video: 'video', game: 'unity_game', quiz: 'quiz', article: 'video', external: 'external_link' };
+					const type = typeMap[String(row.content_type || 'video').toLowerCase()] || 'video';
+					const payload = row.payload || {};
+					let contentConfig = { video: undefined, unity_game: undefined, quiz: undefined, external_link: undefined };
+					if (type === 'video') {
+						// Preserve source-based video config (YouTube, R2, Supabase Storage, external)
+						const source = payload?.video?.source || null;
+						const youtubeUrl = payload?.video?.youtubeUrl || null;
+						const storagePath = payload?.video?.storagePath || null;
+						const url = row.content_url || payload?.video?.url || '';
+						const r2Key = payload?.video?.r2Key || null;
+						
+						if (source === 'youtube' && youtubeUrl) {
+							contentConfig.video = { source: 'youtube', youtubeUrl };
+						} else if (source === 'r2' && r2Key) {
+							contentConfig.video = { source: 'r2', r2Key, url };
+						} else if (source === 'supabase' && storagePath) {
+							contentConfig.video = { source: 'supabase', storagePath, url };
+						} else if (source === 'external' && url) {
+							contentConfig.video = { source: 'external', url };
+						} else if (storagePath) {
+							// Legacy: storagePath without explicit source
+							contentConfig.video = { source: 'supabase', storagePath, url };
+						} else if (url) {
+							// Fallback: external URL
+							contentConfig.video = { source: 'external', url };
+						} else {
+							contentConfig.video = { url: '' };
+						}
+					} else if (type === 'unity_game') {
+						// Preserve R2 Unity builds
+						const source = payload?.unity_game?.source || null;
+						const r2Key = payload?.unity_game?.r2Key || null;
+						const url = row.content_url || payload?.unity_game?.url || '';
+						if (source === 'r2' && r2Key) {
+							contentConfig.unity_game = { source: 'r2', r2Key, url };
+						} else {
+							contentConfig.unity_game = { source: source || 'external', url };
+						}
+					} else if (type === 'quiz') {
+						contentConfig.quiz = payload?.quiz || { shuffleQuestions: true, questions: [] };
+					} else if (type === 'external_link') {
+						const links = (payload?.external_link?.links && Array.isArray(payload.external_link.links)) ? payload.external_link.links : [];
+						const previewVideoUrl = payload?.external_link?.previewVideoUrl || '';
+						contentConfig.external_link = { links, previewVideoUrl };
+					}
+					return {
+						id: row.id,
+						conceptId: row.concept_id || row.conceptId || null,
+						title: row.title || row.id,
+						description: row.description || '',
+						type,
+						minutes: 0,
+						difficulty: 'beginner',
+						contentConfig,
+						xpReward: 0,
+						isCustom: false
+					};
+				});
+				console.log('[loadAllLessons] Normalized lessons:', normalized.length);
+				console.log('[loadAllLessons] Returning normalized lessons from Supabase');
+				return normalized;
+			} else {
+				console.log('[loadAllLessons] No lessons from Supabase (error or empty array)');
+			}
+		} else {
+			console.log('[loadAllLessons] Supabase NOT configured');
+		}
+	} catch (e) {
+		console.error('[loadAllLessons] Error loading from Supabase:', e);
+		console.error('[loadAllLessons] Stack:', e.stack);
+	}
+	// Return empty array if Supabase is not configured or failed (no fallback)
+	console.log('[loadAllLessons] Returning empty array (no Supabase data)');
+	return [];
 }

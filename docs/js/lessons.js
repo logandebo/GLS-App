@@ -4,7 +4,11 @@ let _lessons = null; // Array of lessons (merged built-in + custom)
 let _lessonMap = null; // Map id -> lesson
 
 export async function loadLessons() {
-	if (_lessons) return _lessons;
+	if (_lessons) {
+		console.log('[loadLessons] _lessons already cached with', _lessons.length, 'lessons - returning cache');
+		console.log('[loadLessons] Cached lesson IDs:', _lessons.map(l => l.id));
+		return _lessons;
+	}
 	console.log('[loadLessons] Loading lessons from Supabase...');
 	const merged = await loadAllLessons();
 	console.log('[loadLessons] loadAllLessons returned:', merged?.length || 0, 'lessons');
